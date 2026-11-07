@@ -1,13 +1,17 @@
 //! The Khronos samples whose licences keep them out of this repository,
-//! fetched by `tools/fetch_samples.sh`: they read and write back the same.
+//! from the folder `GLTF_SAMPLES` names (Studio's `tools/fetch_data.py`
+//! fetches them): they read and write back the same.
 use crate::common;
 
-use std::path::Path;
+use std::path::PathBuf;
 
 #[test]
-#[ignore = "hand: needs tools/fetch_samples.sh"]
+#[ignore = "hand: against the fetched samples in GLTF_SAMPLES"]
 fn hand_run_fetched_samples_read_and_write_back_the_same() {
-    let fetched = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/khronos-fetched");
+    let fetched = PathBuf::from(
+        std::env::var_os("GLTF_SAMPLES")
+            .expect("GLTF_SAMPLES: the fetched samples (Studio's tools/fetch_data.py)"),
+    );
     for file in [
         "DamagedHelmet/glTF-Binary/DamagedHelmet.glb",
         "DamagedHelmet/glTF/DamagedHelmet.gltf",

@@ -105,6 +105,23 @@ pub fn primitive(bytes: &[u8], views: &str, accessors: &str, primitive: &str) ->
     )
 }
 
+/// Checks every `.glb` and `.gltf` under `dir` with the Khronos
+/// glTF-Validator, the release `GLTF_VALIDATOR` names (Studio's
+/// `tools/fetch_data.py` brings it): none has an error. Its report on each
+/// file is written beside the file.
+pub fn validate(dir: &Path) {
+    let validator = std::env::var_os("GLTF_VALIDATOR")
+        .expect("GLTF_VALIDATOR: the Khronos glTF-Validator (Studio's tools/fetch_data.py)");
+    let run = std::process::Command::new(validator)
+        .arg("--messages")
+        .arg(dir)
+        .output()
+        .expect("the validator starts");
+    let log = String::from_utf8_lossy(&run.stderr);
+    println!("{log}");
+    assert!(run.status.success(), "the validator found errors:\n{log}");
+}
+
 /// `model` written as a GLB and as a `.gltf` with its files, each read back.
 pub fn written_and_read(model: &Gltf) -> [Gltf; 2] {
     let glb = read_bytes(&gltf::to_glb(model).unwrap()).unwrap();

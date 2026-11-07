@@ -635,13 +635,12 @@ fn damaged_files_are_errors_and_a_cancelled_read_stops() {
     assert_eq!(read.unwrap_err(), kinogaki_studio_api::Error::cancelled());
 }
 
-/// Writes every sample through the format, as Studio exports it, into
-/// `$GLTF_OUT` as a GLB and a `.gltf`, for the local validator
-/// (`tools/validate.mjs`).
+/// Every sample written through the format, as Studio exports it, as a GLB
+/// and a `.gltf`, has no error the Khronos glTF-Validator finds.
 #[test]
-#[ignore = "hand: writes files for the local validator"]
-fn hand_run_write_every_sample_through_the_format_for_the_validator() {
-    let out = PathBuf::from(std::env::var("GLTF_OUT").expect("GLTF_OUT, a directory"));
+#[ignore = "hand: against the Khronos glTF-Validator in GLTF_VALIDATOR"]
+fn hand_run_every_sample_written_through_the_format_passes_the_validator() {
+    let out = scratch("validated");
     let writing = Writing::new(Units::default(), &Rec709);
     let writer = Format.writer().unwrap();
     for path in samples() {
@@ -662,6 +661,7 @@ fn hand_run_write_every_sample_through_the_format_for_the_validator() {
                 .unwrap();
         }
     }
+    common::validate(&out);
 }
 
 #[test]

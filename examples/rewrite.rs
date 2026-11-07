@@ -1,5 +1,7 @@
 //! Reads glTF files and writes each back as a GLB and as a `.gltf` with its
-//! files, for the Khronos glTF-Validator (`tools/validate.mjs`) to check:
+//! files, for the Khronos glTF-Validator to check (`gltf_validator --messages
+//! <out dir>`; Studio's `tools/fetch_data.py` brings it to
+//! `~/.kinogaki/data/gltf-validator`):
 //!
 //! ```sh
 //! cargo run --release --example rewrite -- <out dir> tests/fixtures/khronos/Models/*/*/*.gl*

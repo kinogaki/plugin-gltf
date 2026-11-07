@@ -2,8 +2,8 @@
 # Written by `python3 tools/check_all.py --inventory`; every check compares its tests with it.
 kinogaki-gltf/doc test plugins/gltf/src/gltf/mod.rs - gltf
 kinogaki-gltf/gltf hand fetched::hand_run_fetched_samples_read_and_write_back_the_same
-kinogaki-gltf/gltf hand format::hand_run_write_every_sample_through_the_format_for_the_validator
-kinogaki-gltf/gltf hand round_trip::hand_run_write_the_model_setting_every_field_for_the_validator
+kinogaki-gltf/gltf hand format::hand_run_every_sample_written_through_the_format_passes_the_validator
+kinogaki-gltf/gltf hand round_trip::hand_run_the_model_setting_every_field_passes_the_validator
 kinogaki-gltf/gltf test accessors::a_sparse_accessor_without_a_view_replaces_zeros
 kinogaki-gltf/gltf test accessors::components_normalize_as_gltf_defines
 kinogaki-gltf/gltf test accessors::strided_views_and_padded_matrix_columns_read_element_by_element

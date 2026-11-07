@@ -2,7 +2,7 @@
 //! materials are lossless), a model setting every field, and the writer's
 //! own output byte for byte.
 
-use crate::common::{read, read_bytes, samples, written_and_read};
+use crate::common::{read, read_bytes, samples, validate, written_and_read};
 use kinogaki_gltf::gltf::{
     self, AlphaMode, Anisotropy, Attribute, Camera, Clearcoat, Gltf, GltfError, Image, ImageData,
     Iridescence, Kind, Light, LightKind, MagFilter, Material, Mesh, MinFilter, Node, Primitive,
@@ -118,14 +118,14 @@ fn a_model_that_cant_be_written_is_refused_naming_where() {
     );
 }
 
-/// Writes the model setting every field into `$GLTF_OUT` (a GLB and a
-/// `.gltf` with its files), for the glTF-Validator (`tools/validate.mjs`).
-/// Its content is made one the validator finds sound: real PNGs, no KTX2
-/// (which the validator doesn't read), no volume on a double-sided
-/// material, every light used, no textured lines.
+/// The model setting every field, written as a GLB and as a `.gltf` with its
+/// files, has no error the Khronos glTF-Validator finds. Its content is made
+/// one the validator finds sound: real PNGs, no KTX2 (which the validator
+/// doesn't read), no volume on a double-sided material, every light used, no
+/// textured lines.
 #[test]
-#[ignore = "hand: writes files for the local validator"]
-fn hand_run_write_the_model_setting_every_field_for_the_validator() {
+#[ignore = "hand: against the Khronos glTF-Validator in GLTF_VALIDATOR"]
+fn hand_run_the_model_setting_every_field_passes_the_validator() {
     const PNG: [u8; 70] = [
         0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
         0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f,
@@ -149,11 +149,13 @@ fn hand_run_write_the_model_setting_every_field_for_the_validator() {
     model.materials[0].double_sided = false;
     model.meshes[0].primitives[1].material = None;
     model.nodes[1].light = Some(1);
-    let out = std::path::PathBuf::from(std::env::var("GLTF_OUT").expect("GLTF_OUT, a directory"));
+    let out = std::env::temp_dir().join(format!("kinogaki-gltf-{}-everything", std::process::id()));
+    let _ = std::fs::remove_dir_all(&out);
     std::fs::create_dir_all(&out).unwrap();
     for name in ["everything.glb", "everything.gltf"] {
         gltf::write_file(&model, &out.join(name)).unwrap();
     }
+    validate(&out);
 }
 
 /// A texture reference to `texture` on set 0.
