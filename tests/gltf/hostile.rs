@@ -119,7 +119,7 @@ fn a_buffer_out_of_the_folder_is_refused_however_its_path_is_written() {
     // Turned on, a name reaches outside, and still never a device.
     let mut anywhere = Format.options();
     anywhere.insert(options::OUTSIDE.into(), Value::Bool(true));
-    let text = gltf(r#""buffers":[{"uri":"../../../../../../../../dev/zero","byteLength":3}]"#);
+    let text = gltf(r#""buffers":[{"uri":"/dev/zero","byteLength":3}]"#);
     std::fs::write(&file, &text).unwrap();
     let read = read_hostile(
         &Format,
