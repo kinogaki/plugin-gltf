@@ -1,7 +1,8 @@
 //! The default scene's node tree as items, parents first: a node is its
 //! mesh, else its camera or light when it holds nothing else, else a Part;
-//! what else it holds is an item under it. A mesh several nodes use is one
-//! value their items share (held once in memory, and written once).
+//! what else it holds is an item under it. A mesh several nodes use is
+//! instances of it, one placement where the node is: one value their items
+//! share, the mesh held once (and written once).
 //!
 //! Lights (`KHR_lights_punctual`): a point light is a spot of
 //! 180° and 1 mm radius, a spot light a spot of its outer cone softened
@@ -15,8 +16,9 @@ use crate::space::{Placed, Space};
 use kinogaki_render_api::standard::{Light, Shape};
 use kinogaki_render_api::{Camera, Projection as Lens};
 use kinogaki_studio_api::color::ColorService;
+use kinogaki_studio_api::geometry::{Attributes, Xform};
 use kinogaki_studio_api::render::lights::light_value;
-use kinogaki_studio_api::standard::{self, lens};
+use kinogaki_studio_api::standard::{self, Instances, lens};
 use kinogaki_studio_api::{Data, Diagnostic, Error, FileItem};
 
 /// A point or spot light's radius, metres.
@@ -62,7 +64,6 @@ pub(super) fn items(
             ("", None) => (held.first()).map_or_else(|| "Node".to_owned(), |h| h.0.clone()),
             (name, _) => name.to_owned(),
         };
-        // A mesh several nodes use is one value their objects share.
         let own = mesh.map(|(_, polygons)| polygons.clone());
         let alone = own.is_none() && node.children.is_empty() && held.len() == 1;
         let (data, placed) = match alone {
@@ -96,6 +97,25 @@ pub(super) fn items(
         )));
     }
     Ok(())
+}
+
+/// `meshes` with each that several nodes use as instances of it, one
+/// placement where the node is.
+pub(super) fn shared(model: &Gltf, meshes: Vec<Option<Data>>) -> Result<Vec<Option<Data>>, Error> {
+    let mut uses = vec![0_usize; meshes.len()];
+    for m in model.nodes.iter().filter_map(|n| n.mesh) {
+        uses[m] += 1;
+    }
+    (meshes.into_iter().zip(uses))
+        .map(|(mesh, uses)| match mesh {
+            Some(polygons) if uses > 1 => {
+                let here = vec![Xform::IDENTITY].into();
+                let one = Instances::new(vec![polygons], here, None, Attributes::new())?;
+                Ok(Some(standard::instances().wrap(one)))
+            }
+            mesh => Ok(mesh),
+        })
+        .collect()
 }
 
 /// The nodes the default scene shows (`scene`, else the first), else every

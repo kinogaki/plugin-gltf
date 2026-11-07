@@ -2,7 +2,8 @@
 //! space, holding its mesh (one value several items share written once),
 //! light or camera; instances a child node an instance, each prototype's
 //! mesh written once (once more for an instance whose `material` stands in
-//! for its prototype's own). Lights
+//! for its prototype's own), but one placement where the node is of a mesh
+//! in its own material (a mesh several nodes show) the node's mesh. Lights
 //! and cameras are the read's inverse; an area light is written as a spot
 //! light of its intensity facing down its axis, a dome is left out, said.
 use super::Out;
@@ -12,7 +13,7 @@ use crate::read::scene::FAR;
 use crate::space::{self, Placed};
 use kinogaki_render_api::standard::{Emission, Light, Shape, blackbody, illuminant};
 use kinogaki_render_api::{Projection as Lens, RENDER_SPACE};
-use kinogaki_studio_api::geometry::{Domain, Geometry, names};
+use kinogaki_studio_api::geometry::{Domain, Geometry, Xform, names};
 use kinogaki_studio_api::standard::{self, Instances};
 use kinogaki_studio_api::{Data, Error, FileItem};
 use std::collections::HashMap;
@@ -77,7 +78,10 @@ fn held(
         out.model.cameras.push(camera_of(camera, name, out));
         node.camera = Some(out.model.cameras.len() - 1);
     } else if let Some(copies) = standard::instances().get(data) {
-        node.children = instances(copies, name, meshes, out)?;
+        match here(copies) {
+            Some(prototype) => held(prototype, name, node, meshes, out)?,
+            None => node.children = instances(copies, name, meshes, out)?,
+        }
     } else if let Some(&mesh) = meshes.0.get(&(data.identity(), None)) {
         // A value several items share (a glTF mesh several nodes used).
         node.mesh = mesh;
@@ -88,6 +92,15 @@ fn held(
         out.warn(format!("{name}: glTF holds no {}; left out", data.ty()));
     }
     Ok(())
+}
+
+/// The one prototype `copies` places where it is, in its own material: what
+/// the node holds itself.
+fn here(copies: &Instances) -> Option<&Data> {
+    let looks = copies.attributes().text(Domain::Instance, names::MATERIAL);
+    let own = looks.is_none_or(|t| t.get(0).is_none_or(str::is_empty));
+    let here = copies.xforms().as_slice() == [Xform::IDENTITY];
+    (here && own).then(|| &copies.prototypes()[copies.prototype_index(0)])
 }
 
 /// `data` as polygons: its own, or as the installed mesher makes them.

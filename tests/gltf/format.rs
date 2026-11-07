@@ -8,7 +8,7 @@ use crate::common;
 use crate::common::samples;
 use kinogaki_gltf::{Format, gltf};
 use kinogaki_studio_api::geometry::image::{ImageColor, ImageFile};
-use kinogaki_studio_api::geometry::{Domain, Units, UpAxis, names};
+use kinogaki_studio_api::geometry::{Domain, Units, UpAxis, Xform, names};
 use kinogaki_studio_api::image_files::{IMAGE_NODE, image_node, image_source};
 use kinogaki_studio_api::network::{NetworkSeed, NewNode};
 use kinogaki_studio_api::standard::{self, Materials};
@@ -320,19 +320,40 @@ fn a_project_in_millimetres_z_up_holds_the_file_where_its_axes_put_it() {
 }
 
 #[test]
-fn a_mesh_several_nodes_use_is_one_value_and_is_written_once() {
+fn a_mesh_several_nodes_use_is_instances_of_it_held_and_written_once() {
     let path = common::sample("TextureTransformTest", "glTF");
     let original = common::read_path(&path);
     let read = imported(&path, Units::default());
-    let values: Vec<&kinogaki_studio_api::Data> = (read.items.iter())
+    let held: Vec<&kinogaki_studio_api::Data> = (read.items.iter())
         .filter_map(|i| i.data.as_ref())
-        .filter(|d| standard::geometry().get(d).is_some())
+        .filter(|d| standard::geometry().get(d).is_some() || standard::instances().get(d).is_some())
         .collect();
-    let distinct: std::collections::BTreeSet<usize> = values.iter().map(|d| d.identity()).collect();
-    assert!(distinct.len() < values.len(), "shared values");
+    // Each node's mesh: its own polygons, or what the instances it holds place.
+    let mesh = |d: &kinogaki_studio_api::Data| match standard::instances().get(d) {
+        Some(copies) => {
+            assert_eq!(
+                copies.xforms().as_slice(),
+                [Xform::IDENTITY],
+                "where the node is"
+            );
+            copies.prototypes()[0].identity()
+        }
+        None => d.identity(),
+    };
+    let instances = held
+        .iter()
+        .filter(|d| standard::instances().get(d).is_some());
+    assert!(instances.count() > 1, "instances of a shared mesh");
+    let distinct: std::collections::BTreeSet<usize> = held.iter().map(|d| mesh(d)).collect();
     assert_eq!(distinct.len(), original.meshes.len());
     let (back, _) = written(&read, Units::default(), "Shared.glb");
     assert_eq!(back.meshes.len(), original.meshes.len());
+    let showing = |model: &gltf::Gltf| model.nodes.iter().filter(|n| n.mesh.is_some()).count();
+    assert_eq!(
+        showing(&back),
+        showing(&original),
+        "each node its mesh, as read"
+    );
 }
 
 /// What a file's default scene shows: its elements by kind, and the sums of

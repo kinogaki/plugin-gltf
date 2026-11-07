@@ -3,9 +3,10 @@
 //! The model is read whole (`gltf::read`), then converted: its images to
 //! the files Image nodes read, its materials to MaterialX glTF PBR networks
 //! (`material`), its meshes to polygons (`mesh`), and the default scene's
-//! node tree to items (`scene`): Parts, meshes (a mesh several nodes use one
-//! shared value), lights and cameras, all moved from glTF's metres, +Y up, into the
-//! project's space ([`Space`]). The materials item comes first.
+//! node tree to items (`scene`): Parts, meshes (a mesh several nodes use as
+//! instances of it, held once), lights and cameras, all moved from glTF's
+//! metres, +Y up, into the project's space ([`Space`]). The materials item
+//! comes first.
 mod material;
 pub(crate) mod mesh;
 pub(crate) mod scene;
@@ -91,6 +92,7 @@ pub(crate) fn read(
         false => vec![materials],
     };
     let colors = reading.colors;
+    let meshes = scene::shared(&model, meshes)?;
     scene::items(&model, &meshes, &space, colors, &mut items, &mut warnings)?;
     let items = match reading.purpose {
         Purpose::Objects => items,
