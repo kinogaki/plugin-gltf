@@ -663,3 +663,24 @@ fn hand_run_write_every_sample_through_the_format_for_the_validator() {
         }
     }
 }
+
+#[test]
+fn a_mesh_of_primitives_with_and_without_a_material_reads() {
+    let text = r#"{"asset":{"version":"2.0"},
+        "buffers":[{"uri":"data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAA","byteLength":36}],
+        "bufferViews":[{"buffer":0,"byteLength":36}],
+        "accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3"}],
+        "materials":[{}],
+        "meshes":[{"primitives":[{"attributes":{"POSITION":0},"material":0},{"attributes":{"POSITION":0}}]}],
+        "nodes":[{"mesh":0}]}"#;
+    let reading = Reading::new(Purpose::Objects, Units::default(), &Rec709);
+    let input = Input::memory("mixed.gltf", text.as_bytes());
+    let read = Format.read(&input, &Format.options(), &reading).unwrap();
+    let mesh = standard::geometry()
+        .get(read.items[1].data.as_ref().unwrap())
+        .unwrap();
+    let keys = (mesh.attributes())
+        .text(Domain::Primitive, names::MATERIAL)
+        .unwrap();
+    assert_eq!((keys.get(0), keys.get(1)), (Some("0"), None));
+}

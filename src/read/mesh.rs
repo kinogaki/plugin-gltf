@@ -288,16 +288,17 @@ impl Table {
         Ok(table)
     }
 
-    /// Each element's material key; empty for a primitive with none.
+    /// Each element's material key; no value for a primitive with none.
     fn materials(&self, prims: &[&Primitive]) -> Result<Attribute, Error> {
         let mut keys: Vec<Arc<str>> = Vec::new();
-        let mut slot: HashMap<Option<usize>, u32> = HashMap::new();
+        let mut slot: HashMap<usize, u32> = HashMap::new();
         let slots: Vec<u32> = (prims.iter())
-            .map(|p| {
-                *slot.entry(p.material).or_insert_with(|| {
-                    keys.push(p.material.map_or_else(|| Arc::from(""), |m| key(m).into()));
+            .map(|p| match p.material {
+                None => Text::NONE,
+                Some(m) => *slot.entry(m).or_insert_with(|| {
+                    keys.push(key(m).into());
                     (keys.len() - 1) as u32
-                })
+                }),
             })
             .collect();
         let indices = self.from.iter().map(|&p| slots[p as usize]).collect();
