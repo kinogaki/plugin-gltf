@@ -1,5 +1,5 @@
 //! Hostile files: each shape that once asked Studio for far more than a
-//! file holds, or reached files outside the file's folder, read as File ▸
+//! file holds, or a file it names that isn't a regular one, read as File ▸
 //! Import reads one (`read_hostile`: a 2 MiB stack and a budget), ending
 //! in its items, a clean error or a warning within a time bound.
 use kinogaki_gltf::{Format, gltf};
@@ -10,8 +10,8 @@ use kinogaki_studio_api::standard::{self, ImportedMaterial};
 use kinogaki_studio_api::{
     Error, FileFormat, FileItem, FormatOptions, Imported, Input, Purpose, Reading, Value, Writing,
 };
+use kinogaki_studio_api_testing::format::Scratch;
 use kinogaki_studio_api_testing::{Unconverted, read_hostile};
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -40,15 +40,11 @@ fn refused(read: (Result<Imported, Error>, Duration), why: &str) {
 
 /// A new folder holding `scene/` (where the file is read) beside a
 /// `secret` file, by its canonical path.
-fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "kinogaki-gltf-hostile-{name}-{}",
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
+fn scratch(name: &str) -> Scratch {
+    let dir = Scratch::new(&format!("gltf-hostile-{name}"));
     std::fs::create_dir_all(dir.join("scene/maps")).unwrap();
     std::fs::write(dir.join("secret"), b"key").unwrap();
-    dir.canonicalize().unwrap()
+    dir
 }
 
 #[test]
@@ -100,35 +96,27 @@ fn a_scene_listing_a_root_twice_is_refused() {
 }
 
 #[test]
-fn a_buffer_out_of_the_folder_is_refused_however_its_path_is_written() {
+fn a_buffer_out_of_the_folder_is_read_however_its_path_is_written() {
     let dir = scratch("buffers");
     let file = dir.join("scene/hostile.gltf");
-    for uri in [
-        "%2Fetc%2Fhosts",
-        "../secret",
-        "..%2Fsecret",
-        "/dev/zero",
-        "maps/../../secret",
-    ] {
+    let absolute = dir.join("secret").display().to_string().replace('/', "%2F");
+    for uri in ["../secret", "..%2Fsecret", "maps/../../secret", &absolute] {
+        let text = gltf(&format!(r#""buffers":[{{"uri":"{uri}","byteLength":3}}]"#));
+        std::fs::write(&file, &text).unwrap();
+        let input = Input::file(&file);
+        let (read, took) = read_hostile(&Format, &input, &Format.options(), ReadLimits::default());
+        let read = read.unwrap_or_else(|e| panic!("{uri}: {e}"));
+        assert!(read.warnings.is_empty(), "{uri}: {:?}", read.warnings);
+        assert!(took < BOUND);
+    }
+    // Never a device, however it is named.
+    for uri in ["/dev/zero", "%2Fdev%2Fzero"] {
         let text = gltf(&format!(r#""buffers":[{{"uri":"{uri}","byteLength":3}}]"#));
         std::fs::write(&file, &text).unwrap();
         let input = Input::file(&file);
         let read = read_hostile(&Format, &input, &Format.options(), ReadLimits::default());
-        refused(read, "outside the folder");
+        refused(read, "not regular files");
     }
-    // Turned on, a name reaches outside, and still never a device.
-    let mut anywhere = Format.options();
-    anywhere.insert(options::OUTSIDE.into(), Value::Bool(true));
-    let text = gltf(r#""buffers":[{"uri":"/dev/zero","byteLength":3}]"#);
-    std::fs::write(&file, &text).unwrap();
-    let read = read_hostile(
-        &Format,
-        &Input::file(&file),
-        &anywhere,
-        ReadLimits::default(),
-    );
-    refused(read, "not regular files");
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
@@ -153,7 +141,6 @@ fn a_buffer_that_is_a_pipe_is_never_opened() {
         ReadLimits::default(),
     );
     refused(read, "not regular files");
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// A glTF whose material reads each of `uris` as an image, through
@@ -188,7 +175,7 @@ fn image_files(read: &Imported) -> String {
 }
 
 #[test]
-fn images_out_of_reach_or_elsewhere_are_left_out_with_a_warning() {
+fn images_elsewhere_or_not_regular_are_left_out_with_a_warning() {
     let dir = scratch("images");
     std::fs::write(dir.join("scene/maps/wood.png"), b"\x89PNG wood").unwrap();
     let pipe = dir.join("scene/maps/pipe.png");
@@ -214,11 +201,7 @@ fn images_out_of_reach_or_elsewhere_are_left_out_with_a_warning() {
     let read = read.unwrap();
     assert!(took < BOUND);
     let said: Vec<&str> = read.warnings.iter().map(|w| w.message.as_str()).collect();
-    let outside = said
-        .iter()
-        .find(|w| w.contains("outside the folder"))
-        .expect("said");
-    assert!(outside.ends_with("../secret, /etc/hosts"), "{said:?}");
+    assert_eq!(said.len(), 2, "{said:?}");
     assert!(
         said.iter()
             .any(|w| w.contains("http://example.com/a.png") && w.contains("left out")),
@@ -230,11 +213,15 @@ fn images_out_of_reach_or_elsewhere_are_left_out_with_a_warning() {
         "{said:?}"
     );
     let files = image_files(&read);
-    for gone in ["hosts", "secret", "example.com", "pipe"] {
+    for gone in ["example.com", "pipe"] {
         assert!(!files.contains(gone), "{gone}: {files}");
     }
-    assert!(files.contains("wood"), "the one in reach, embedded");
-    std::fs::remove_dir_all(&dir).unwrap();
+    for read in ["hosts", "secret", "wood"] {
+        assert!(
+            files.contains(read),
+            "{read}, embedded wherever it is: {files}"
+        );
+    }
 }
 
 /// A GLB of `json` and the binary chunk `bin`.
@@ -366,7 +353,7 @@ fn a_gltf_written_beside_other_files_never_overwrites_them() {
             &FormatOptions::new(),
         )
         .unwrap();
-    let written: Vec<PathBuf> = std::fs::read_dir(scene.join("first_textures"))
+    let written: Vec<std::path::PathBuf> = std::fs::read_dir(scene.join("first_textures"))
         .unwrap()
         .map(|e| e.unwrap().path())
         .collect();
@@ -415,7 +402,6 @@ fn a_gltf_written_beside_other_files_never_overwrites_them() {
         ReadLimits::default(),
     );
     assert!(back.0.unwrap().warnings.is_empty());
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
@@ -427,16 +413,13 @@ fn a_file_held_in_memory_names_no_file_on_disk() {
     assert!(named.folder().is_none());
     let (read, _) = read_hostile(&Format, &input, &Format.options(), ReadLimits::default());
     let read = read.unwrap();
+    // Its pictures keep their names as written, for the project to find.
     let files = image_files(&read);
     assert!(
-        files.contains("maps/wood.png") && !files.contains("../wood.png"),
+        files.contains("maps/wood.png") && files.contains("../wood.png"),
         "{files}"
     );
-    assert!(
-        read.warnings
-            .iter()
-            .any(|w| w.message.contains("held in memory"))
-    );
+    assert!(read.warnings.is_empty(), "{:?}", read.warnings);
     let buffer = gltf(r#""buffers":[{"uri":"data.bin","byteLength":3}]"#);
     refused(
         read_hostile(

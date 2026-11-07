@@ -10,11 +10,10 @@
 //! `extract`; occlusion's strength is a `mix` with 1. Colors are converted
 //! from linear Rec.709 into the working space, lengths into the project's
 //! units.
-use super::LINEAR_SRGB;
 use super::mesh::key;
 use crate::gltf::{self, AlphaMode, Gltf, MagFilter, MinFilter, TextureRef, Wrap};
-use crate::space::Space;
-use kinogaki_studio_api::color::ColorService;
+use kinogaki_studio_api::color::{ColorService, LIN_REC709};
+use kinogaki_studio_api::format::Conversion;
 use kinogaki_studio_api::geometry::image::{ImageColor, ImageFile, ImageSource};
 use kinogaki_studio_api::image_files::image_node;
 use kinogaki_studio_api::network::{NetworkSeed, NewNode};
@@ -29,7 +28,7 @@ pub(super) fn materials(
     files: &[Option<ImageFile>],
     colored: &[bool],
     colors: &dyn ColorService,
-    space: &Space,
+    space: &Conversion,
 ) -> Result<Vec<ImportedMaterial>, Error> {
     (model.materials.iter().enumerate())
         .map(|(at, m)| {
@@ -65,7 +64,7 @@ struct Seed<'a> {
     model: &'a Gltf,
     files: &'a [Option<ImageFile>],
     colors: &'a dyn ColorService,
-    space: &'a Space,
+    space: &'a Conversion,
     seed: NetworkSeed,
     /// The Image nodes made: an image read as data or color, and its node.
     images: Vec<((usize, bool), usize)>,
@@ -105,7 +104,7 @@ impl Seed<'_> {
     /// `rgb`, linear Rec.709, in the working space.
     fn color(&self, rgb: [f64; 3]) -> Result<[f64; 3], Error> {
         let mut c = [rgb];
-        self.colors.to_working(LINEAR_SRGB, &mut c)?;
+        self.colors.to_working(LIN_REC709, &mut c)?;
         Ok(c[0])
     }
 

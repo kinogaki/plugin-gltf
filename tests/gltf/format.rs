@@ -15,7 +15,8 @@ use kinogaki_studio_api::standard::{self, Materials};
 use kinogaki_studio_api::{
     FileFormat, FileItem, FormatOptions, Imported, Input, Purpose, Reading, Value, Writing,
 };
-use std::path::{Path, PathBuf};
+use kinogaki_studio_api_testing::format::Scratch;
+use std::path::Path;
 
 /// A project whose working space is glTF's own, linear Rec.709: colors
 /// arrive and leave as the file holds them.
@@ -158,7 +159,7 @@ fn embed_textures_reads_the_images_beside_into_the_project() {
 /// `read` written as `name` (its extension choosing GLB or `.gltf`) in a
 /// fresh folder, and that file's model.
 fn written(read: &Imported, units: Units, name: &str) -> (gltf::Gltf, Vec<String>) {
-    let dir = scratch(name);
+    let dir = Scratch::new(name);
     let path = dir.join(name);
     let writing = Writing::new(units, &Rec709);
     let writer = Format.writer().unwrap();
@@ -166,23 +167,7 @@ fn written(read: &Imported, units: Units, name: &str) -> (gltf::Gltf, Vec<String
         .write(&path, &read.items, &writing, &FormatOptions::new())
         .unwrap_or_else(|e| panic!("{name}: {e}"));
     let model = crate::common::read_path(&path);
-    std::fs::remove_dir_all(&dir).unwrap();
     (model, said.into_iter().map(|d| d.message).collect())
-}
-
-/// A new, empty folder for `name`, by its canonical path (the system's
-/// temporary folder may be behind a link, which a relative path a written
-/// `.gltf` names can't climb back through).
-fn scratch(name: &str) -> PathBuf {
-    static MADE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    let made = MADE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
-        "kinogaki-gltf-{}-{made}-{name}",
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir.canonicalize().unwrap()
 }
 
 #[test]
@@ -640,7 +625,7 @@ fn damaged_files_are_errors_and_a_cancelled_read_stops() {
 #[test]
 #[ignore = "hand: against the Khronos glTF-Validator in GLTF_VALIDATOR"]
 fn hand_run_every_sample_written_through_the_format_passes_the_validator() {
-    let out = scratch("validated");
+    let out = Scratch::new("validated");
     let writing = Writing::new(Units::default(), &Rec709);
     let writer = Format.writer().unwrap();
     for path in samples() {

@@ -13,8 +13,8 @@ use super::json::{Members, Value};
 use super::model::{Gltf, ImageData};
 use super::{GltfError, glb, uri};
 use binary::Binary;
+use kinogaki_studio_api::format::{Unique, files};
 use std::collections::BTreeSet;
-use std::fs;
 use std::path::Path;
 
 type Result<T> = std::result::Result<T, GltfError>;
@@ -50,10 +50,11 @@ pub fn to_gltf(gltf: &Gltf, stem: &str) -> Result<GltfFiles> {
 }
 
 /// Writes the model at `path`: a GLB for `.glb`, else `.gltf` text with
-/// its files beside it.
+/// its files beside it, each file whole or not at all (`files::replace`).
 pub fn write_file(gltf: &Gltf, path: &Path) -> Result<()> {
     let write = |path: &Path, bytes: &[u8]| {
-        fs::write(path, bytes).map_err(|error| GltfError::Io {
+        let all = |file: &mut std::fs::File| std::io::Write::write_all(file, bytes);
+        files::replace(path, all).map_err(|error| GltfError::Io {
             file: path.display().to_string(),
             error,
         })
@@ -81,7 +82,10 @@ fn document(gltf: &Gltf, stem: Option<&str>) -> Result<Document> {
     let mut binary = Binary::default();
     let mut beside = Vec::new();
     // The buffer's file is taken before any image's.
-    let mut names: BTreeSet<String> = stem.map(|stem| format!("{stem}.bin")).into_iter().collect();
+    let mut names = Unique::files();
+    if let Some(stem) = stem {
+        names.take(&format!("{stem}.bin"));
+    }
     let mut images = Vec::with_capacity(gltf.images.len());
     let mut mimes = Vec::with_capacity(gltf.images.len());
     for (i, image) in gltf.images.iter().enumerate() {
@@ -266,15 +270,9 @@ fn used_extensions(value: &Value<'_>) -> BTreeSet<String> {
 }
 
 /// An image's file name beside the `.gltf`: its own name made safe, else
-/// the stem and its index, numbered on until unique among `taken` (kept
-/// lowercase, for file systems that ignore case).
-fn file_name(
-    stem: &str,
-    name: &str,
-    index: usize,
-    extension: &str,
-    taken: &mut BTreeSet<String>,
-) -> String {
+/// the stem and its index, unique among `names` (which ignore case, as
+/// some file systems do).
+fn file_name(stem: &str, name: &str, index: usize, extension: &str, names: &mut Unique) -> String {
     let name = name.strip_suffix(&format!(".{extension}")).unwrap_or(name);
     let safe: String = (name.chars())
         .map(|c| match c.is_alphanumeric() || "-_ .".contains(c) {
@@ -286,24 +284,18 @@ fn file_name(
         "" => format!("{stem}_{index}"),
         safe => safe.to_owned(),
     };
-    let mut file = format!("{base}.{extension}");
-    for n in 1.. {
-        if taken.insert(file.to_lowercase()) {
-            break;
-        }
-        file = format!("{base}_{n}.{extension}");
-    }
-    file
+    names.take(&format!("{base}.{extension}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::file_name;
-    use std::collections::BTreeSet;
+    use kinogaki_studio_api::format::Unique;
 
     #[test]
     fn image_files_are_named_after_their_images_and_never_twice() {
-        let mut taken = BTreeSet::from(["scene.bin".to_owned()]);
+        let mut taken = Unique::files();
+        taken.take("scene.bin");
         let mut name = |image: &str, index: usize, extension: &str| {
             file_name("scene", image, index, extension, &mut taken)
         };

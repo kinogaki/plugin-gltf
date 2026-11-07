@@ -9,6 +9,7 @@ use kinogaki_gltf::gltf::{
     Projection, Sampler, Scene, Sheen, Specular, Texture, TextureRef, TextureTransform, Topology,
     Transform, Transmission, Volume, Wrap,
 };
+use kinogaki_studio_api_testing::format::Scratch;
 use std::sync::Arc;
 
 #[test]
@@ -149,9 +150,7 @@ fn hand_run_the_model_setting_every_field_passes_the_validator() {
     model.materials[0].double_sided = false;
     model.meshes[0].primitives[1].material = None;
     model.nodes[1].light = Some(1);
-    let out = std::env::temp_dir().join(format!("kinogaki-gltf-{}-everything", std::process::id()));
-    let _ = std::fs::remove_dir_all(&out);
-    std::fs::create_dir_all(&out).unwrap();
+    let out = Scratch::new("gltf-everything");
     for name in ["everything.glb", "everything.gltf"] {
         gltf::write_file(&model, &out.join(name)).unwrap();
     }

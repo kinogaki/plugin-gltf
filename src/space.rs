@@ -1,16 +1,12 @@
-//! glTF's space (metres, +Y up) and the project's: `C = k R`, `k` the
-//! project's units a metre and `R` the turn from +Y up to the project's up
-//! axis.
-//!
-//! A value is moved into the project's space whole: positions by `C`,
-//! directions by `R`, lengths by `k`. A placement relative to a parent
-//! moves so that what it places lands where `C` puts it: a group's or a
-//! mesh's as `C M C⁻¹`, so it carries no scale of units; a camera's or a
-//! light's as `C M / k`, since their values keep the frame they look down
-//! (−Z, +Y up) in either space and their lengths are in the project's
-//! units already.
+//! glTF's space (metres, +Y up) and the project's, through the SDK's
+//! [`Conversion`] ([`into_project`]): positions by `C`, directions by its
+//! turn, lengths by its scale; a node's placement as a value's (`C M C⁻¹`,
+//! a group, a mesh) or a frame's (a camera, a light: its value keeps the
+//! frame it looks down), as [`Placed`] says. A writer converts back through
+//! the inverse. And glTF's node transforms as placements' rows and back.
 use crate::gltf::Transform;
-use kinogaki_studio_api::geometry::{Units, UpAxis, Xform};
+use kinogaki_studio_api::format::Conversion;
+use kinogaki_studio_api::geometry::{Units, Xform};
 
 /// What a placement places: what keeps its frame across spaces or not.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,110 +17,25 @@ pub(crate) enum Placed {
     Frame,
 }
 
-/// glTF's space in the project's.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Space {
-    /// The project's units a metre.
-    k: f64,
-    /// Whether the project is Z up: `R` turns (x, y, z) to (x, −z, y).
-    z_up: bool,
-}
-
 /// Rows of a 3 × 4 affine matrix, as [`Xform`] holds them.
 type Rows = [[f64; 4]; 3];
 
-impl Space {
-    /// The project's space of `units`.
-    pub(crate) fn of(units: Units) -> Space {
-        Space {
-            k: 1.0 / units.meters_per_unit(),
-            z_up: units.up() == UpAxis::Z,
-        }
-    }
+/// glTF's space into the project's of `units`.
+pub(crate) fn into_project(units: Units) -> Conversion {
+    Conversion::new(Units::METERS, units)
+}
 
-    /// Direction `v` turned to the project's up: `R v`.
-    pub(crate) fn turn(&self, [x, y, z]: [f64; 3]) -> [f64; 3] {
-        match self.z_up {
-            true => [x, -z, y],
-            false => [x, y, z],
-        }
-    }
-
-    /// Direction `v` turned back to glTF's +Y up: `R⁻¹ v`.
-    pub(crate) fn unturn(&self, [x, y, z]: [f64; 3]) -> [f64; 3] {
-        match self.z_up {
-            true => [x, z, -y],
-            false => [x, y, z],
-        }
-    }
-
-    /// `metres` in the project's units.
-    pub(crate) fn length(&self, metres: f64) -> f64 {
-        metres * self.k
-    }
-
-    /// `length`, in the project's units, in metres.
-    pub(crate) fn metres(&self, length: f64) -> f64 {
-        length / self.k
-    }
-
-    /// Position `p` in the project's space: `C p`.
-    pub(crate) fn point(&self, p: [f64; 3]) -> [f64; 3] {
-        self.turn(p).map(|c| c * self.k)
-    }
-
-    /// Position `p` of the project's space in glTF's: `C⁻¹ p`.
-    pub(crate) fn file_point(&self, p: [f64; 3]) -> [f64; 3] {
-        self.unturn(p).map(|c| c / self.k)
-    }
-
-    /// A node's placement relative to its parent in the project's space.
-    pub(crate) fn placement(&self, transform: &Transform, placed: Placed) -> Xform {
-        let m = rows(transform);
-        // Column `col` of the linear part: R L R⁻¹ e_col for a value, R L
-        // e_col for a frame.
-        let cols: [[f64; 3]; 3] = std::array::from_fn(|col| {
-            let source = match placed {
-                Placed::Value => self.unturn(unit(col)),
-                Placed::Frame => unit(col),
-            };
-            self.turn(linear(&m, source))
-        });
-        let origin = self.point([m[0][3], m[1][3], m[2][3]]);
-        Xform::from_rows(joined(cols, origin))
-    }
-
-    /// A placement of the project's space as a glTF node's: the inverse of
-    /// [`placement`](Self::placement).
-    pub(crate) fn file_placement(&self, xform: &Xform, placed: Placed) -> Rows {
-        let x = xform.rows();
-        let cols: [[f64; 3]; 3] = std::array::from_fn(|col| {
-            let source = match placed {
-                Placed::Value => self.turn(unit(col)),
-                Placed::Frame => unit(col),
-            };
-            self.unturn(linear(x, source))
-        });
-        joined(cols, self.file_point([x[0][3], x[1][3], x[2][3]]))
+/// Placement `m`, of what `placed` says, through `conversion`.
+pub(crate) fn placed(conversion: &Conversion, m: &Xform, placed: Placed) -> Xform {
+    match placed {
+        Placed::Value => conversion.placement(m),
+        Placed::Frame => conversion.frame(m),
     }
 }
 
-/// Rows of the affine matrix of linear part `cols` (by columns) and
-/// translation `origin`.
-fn joined(cols: [[f64; 3]; 3], origin: [f64; 3]) -> Rows {
-    std::array::from_fn(|row| [cols[0][row], cols[1][row], cols[2][row], origin[row]])
-}
-
-/// Unit vector along axis `axis`.
-fn unit(axis: usize) -> [f64; 3] {
-    let mut v = [0.0; 3];
-    v[axis] = 1.0;
-    v
-}
-
-/// The linear part of `m` applied to `v`.
-fn linear(m: &Rows, v: [f64; 3]) -> [f64; 3] {
-    std::array::from_fn(|row| (0..3).map(|col| m[row][col] * v[col]).sum())
+/// A node's transform as a placement.
+pub(crate) fn xform(transform: &Transform) -> Xform {
+    Xform::from_rows(rows(transform))
 }
 
 /// A glTF node's transform as rows.
@@ -231,17 +142,18 @@ mod tests {
 
     #[test]
     fn placements_move_into_the_projects_space_and_back() {
-        let millimetres_z_up = Space::of(Units::new(0.001, UpAxis::Z).unwrap());
+        use kinogaki_studio_api::geometry::UpAxis;
+        let into = into_project(Units::new(0.001, UpAxis::Z).unwrap());
         let turned = Transform::Trs {
             translation: [1.0, 2.0, 3.0],
             rotation: [0.0, (0.5f64).sqrt(), 0.0, (0.5f64).sqrt()],
             scale: [2.0, 3.0, 4.0],
         };
-        for placed in [Placed::Value, Placed::Frame] {
-            let x = millimetres_z_up.placement(&turned, placed);
+        for how in [Placed::Value, Placed::Frame] {
+            let x = placed(&into, &xform(&turned), how);
             assert_eq!(<[f64; 3]>::from(x.origin()), [1000.0, -3000.0, 2000.0]);
-            let back = millimetres_z_up.file_placement(&x, placed);
-            assert!(close(&back, &rows(&turned)), "{placed:?}: {back:?}");
+            let back = *placed(&into.inverse(), &x, how).rows();
+            assert!(close(&back, &rows(&turned)), "{how:?}: {back:?}");
             let Transform::Trs {
                 translation,
                 rotation,
@@ -254,19 +166,6 @@ mod tests {
             assert!((rotation[1] - (0.5f64).sqrt()).abs() < 1e-12);
             assert!((scale[2] - 4.0).abs() < 1e-12);
         }
-        // A mesh at its node keeps its world place: C M C⁻¹ (C p) = C (M p).
-        let x = millimetres_z_up.placement(&turned, Placed::Value);
-        let p = [0.5, -1.0, 2.0];
-        let moved = rows(&turned);
-        let file = linear(&moved, p);
-        let file = [
-            file[0] + moved[0][3],
-            file[1] + moved[1][3],
-            file[2] + moved[2][3],
-        ];
-        let at: [f64; 3] = x.apply_point(millimetres_z_up.point(p).into()).into();
-        let expected = millimetres_z_up.point(file);
-        assert!((0..3).all(|i| (at[i] - expected[i]).abs() < 1e-9), "{at:?}");
     }
 
     #[test]

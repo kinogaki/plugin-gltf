@@ -10,12 +10,12 @@
 //! distant one; candela and lux are the intensity's illuminance at a metre,
 //! so a sphere's radiance is its candela over its projected area. Cameras:
 //! `yfov` on a 24 mm high film back, `xmag` and `ymag` as the view's size.
-use super::LINEAR_SRGB;
-use crate::gltf::{self, Gltf, LightKind, Projection, Transform};
-use crate::space::{Placed, Space};
+use crate::gltf::{self, Gltf, LightKind, Projection};
+use crate::space::{self, Placed};
 use kinogaki_render_api::standard::{Light, Shape};
 use kinogaki_render_api::{Camera, Projection as Lens};
-use kinogaki_studio_api::color::ColorService;
+use kinogaki_studio_api::color::{ColorService, LIN_REC709};
+use kinogaki_studio_api::format::Conversion;
 use kinogaki_studio_api::geometry::{Attributes, Xform};
 use kinogaki_studio_api::render::lights::light_value;
 use kinogaki_studio_api::standard::{self, Instances, lens};
@@ -34,7 +34,7 @@ pub(crate) const FAR: f32 = 1e12;
 pub(super) fn items(
     model: &Gltf,
     meshes: &[Option<Data>],
-    space: &Space,
+    space: &Conversion,
     colors: &dyn ColorService,
     items: &mut Vec<FileItem>,
     warnings: &mut Vec<Diagnostic>,
@@ -74,11 +74,11 @@ pub(super) fn items(
         items.push(FileItem {
             name,
             parent,
-            placement: space.placement(&node.transform, placed),
+            placement: space::placed(space, &space::xform(&node.transform), placed),
             visible: true,
             data,
         });
-        let frame = space.placement(&Transform::default(), Placed::Frame);
+        let frame = space.frame(&Xform::IDENTITY);
         for (name, data) in held {
             items.push(FileItem {
                 name,
@@ -149,9 +149,13 @@ fn or(name: &str, fallback: &str) -> String {
 }
 
 /// `light` as a standard light in `space`, its color in the working space.
-fn light_of(light: &gltf::Light, space: &Space, colors: &dyn ColorService) -> Result<Light, Error> {
+fn light_of(
+    light: &gltf::Light,
+    space: &Conversion,
+    colors: &dyn ColorService,
+) -> Result<Light, Error> {
     let mut color = [light.color];
-    colors.to_working(LINEAR_SRGB, &mut color)?;
+    colors.to_working(LIN_REC709, &mut color)?;
     let radius = space.length(RADIUS) as f32;
     let sphere = std::f64::consts::PI * RADIUS * RADIUS;
     let (shape, intensity) = match light.kind {
@@ -189,7 +193,7 @@ fn light_of(light: &gltf::Light, space: &Space, colors: &dyn ColorService) -> Re
 }
 
 /// `camera` as a standard camera's lens in `space`.
-fn camera_value(camera: &gltf::Camera, space: &Space) -> Result<Camera, Error> {
+fn camera_value(camera: &gltf::Camera, space: &Conversion) -> Result<Camera, Error> {
     let near = |znear: f64| (space.length(znear) as f32).max(f32::MIN_POSITIVE);
     let lensed = match camera.projection {
         Projection::Perspective {

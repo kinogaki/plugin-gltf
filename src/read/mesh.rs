@@ -11,9 +11,9 @@
 //! (`_NAME`, kept as named). A primitive lacking one its mesh has takes
 //! zeros (white for colors, its triangles' normals for `N`). A mesh
 //! without normals shades flat, as glTF says: every edge is `sharp`.
-use super::LINEAR_SRGB;
 use crate::gltf::{self, Gltf, Primitive, Topology};
-use crate::space::Space;
+use kinogaki_studio_api::color::LIN_REC709;
+use kinogaki_studio_api::format::Conversion;
 use kinogaki_studio_api::format::ReadBudget;
 use kinogaki_studio_api::geometry::{
     Attribute, AttributeType, Attributes, Column, Domain, Elements, Geometry, Kind, Meaning,
@@ -64,7 +64,7 @@ pub(crate) fn key(material: usize) -> String {
 /// its vertices as points of their own.
 pub(super) fn geometry(
     mesh: &gltf::Mesh,
-    space: &Space,
+    space: &Conversion,
     reading: &Reading<'_>,
     warnings: &mut Vec<Diagnostic>,
 ) -> Result<Option<Geometry>, Error> {
@@ -98,7 +98,12 @@ pub(super) fn geometry(
     for p in &prims {
         reading.check()?;
         let at = &p.attribute("POSITION").expect("kept").values;
-        positions.extend(at.as_chunks::<3>().0.iter().map(|v| space.point(widen(v))));
+        positions.extend(
+            at.as_chunks::<3>()
+                .0
+                .iter()
+                .map(|v| space.point(widen(v).into()).to_array()),
+        );
     }
     let table = Table::of(&prims, &bases, budget)?;
     if table.dropped > 0 {
@@ -140,7 +145,7 @@ pub(super) fn geometry(
             [v[0], v[1], v[2], v.get(3).copied().unwrap_or(1.0)]
         })?;
         let mut rgb: Vec<[f64; 3]> = rgba.iter().map(|c| widen(&c[..3])).collect();
-        colors.to_working(LINEAR_SRGB, &mut rgb)?;
+        colors.to_working(LIN_REC709, &mut rgb)?;
         let cd: Vec<[f32; 3]> = rgb.iter().map(|c| c.map(|v| v as f32)).collect();
         attributes.set(
             Domain::Point,
@@ -165,7 +170,7 @@ pub(super) fn geometry(
         })?;
         let u: Vec<[f32; 3]> = t
             .iter()
-            .map(|t| narrow(space.turn(widen(&t[..3]))))
+            .map(|t| narrow(space.direction(widen(&t[..3]).into()).to_array()))
             .collect();
         let v: Vec<[f32; 3]> = match &normals {
             Some(n) => (u.iter().zip(n).zip(&t))
@@ -316,7 +321,7 @@ fn normals(
     bases: &[usize],
     table: &Table,
     positions: &[[f64; 3]],
-    space: &Space,
+    space: &Conversion,
     budget: &ReadBudget,
 ) -> Result<Vec<[f32; 3]>, Error> {
     let mut n = budget.vec(positions.len())?;
@@ -324,7 +329,7 @@ fn normals(
         budget.check()?;
         if let Some(own) = p.attribute("NORMAL") {
             let turned = own.values.as_chunks::<3>().0.iter();
-            n.extend(turned.map(|v| narrow(space.turn(widen(v)))));
+            n.extend(turned.map(|v| narrow(space.direction(widen(v).into()).to_array())));
             continue;
         }
         let mut sum = vec![[0.0f64; 3]; p.vertex_count()];

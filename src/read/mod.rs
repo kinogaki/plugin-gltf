@@ -5,7 +5,7 @@
 //! (`material`), its meshes to polygons (`mesh`), and the default scene's
 //! node tree to items (`scene`): Parts, meshes (a mesh several nodes use as
 //! instances of it, held once), lights and cameras, all moved from glTF's
-//! metres, +Y up, into the project's space ([`Space`]). The materials item
+//! metres, +Y up, into the project's space (the SDK's `Conversion`). The materials item
 //! comes first.
 mod material;
 pub(crate) mod mesh;
@@ -13,7 +13,7 @@ pub(crate) mod scene;
 
 use crate::at_file;
 use crate::gltf::{self, ImageData};
-use crate::space::Space;
+use crate::space;
 use kinogaki_studio_api::edit::editor::{Placed, gather};
 use kinogaki_studio_api::format::files::Named;
 use kinogaki_studio_api::geometry::image::{EmbeddedFile, ImageFile};
@@ -23,10 +23,6 @@ use kinogaki_studio_api::{
 };
 use std::collections::HashMap;
 use std::path::Path;
-
-/// The space glTF's colors are in: material factors, vertex colors and
-/// lights are linear Rec.709 (sRGB) values.
-pub(crate) const LINEAR_SRGB: &str = "Linear Rec.709 (sRGB)";
 
 /// Reads `input` as `chosen` says: the files a `.gltf` names are reached
 /// through [`Named`] (in its folder and below, unless Read Files Outside
@@ -55,7 +51,7 @@ pub(crate) fn read(
     let mut warnings: Vec<Diagnostic> = (model.left_out.iter())
         .map(|left| Diagnostic::warning(left.to_string()))
         .collect();
-    let space = Space::of(reading.units);
+    let space = space::into_project(reading.units);
     let files = image_files(std::mem::take(&mut model.images), &named, &mut warnings);
     warnings.extend(named.warnings());
     let colored = mesh::colored_materials(&model);

@@ -13,9 +13,9 @@
 //! own.
 use super::Out;
 use crate::gltf::{self, Attribute, Kind, Primitive, Topology};
-use crate::read::LINEAR_SRGB;
 use crate::read::mesh::{TANGENT_U, TANGENT_V, uv_name};
 use kinogaki_studio_api::Error;
+use kinogaki_studio_api::color::LIN_REC709;
 use kinogaki_studio_api::geometry::{Domain, Geometry, Storage, Values, names};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -260,7 +260,7 @@ fn primitive(
     out: &mut Out<'_>,
 ) -> Result<Primitive, Error> {
     let (firsts, indices) = vertices(polygons.positions().len(), columns, corners);
-    let space = out.space;
+    let to_file = out.to_file;
     let positions = polygons.positions();
     let mut attributes = Vec::new();
     let mut column = |name: &str, kind: Kind, values: Vec<f32>| {
@@ -274,13 +274,16 @@ fn primitive(
         "POSITION",
         Kind::Vec3,
         flat(&firsts, |[p, ..]| {
-            space.file_point(positions[p as usize]).map(|c| c as f32)
+            to_file
+                .point(positions[p as usize].into())
+                .to_array()
+                .map(|c| c as f32)
         }),
     );
     if let Some(n) = &columns.normal {
         let unturned = |[p, v, f]: Corner| {
             let n = n.get(p, v, f).map(f64::from);
-            space.unturn(n).map(|c| c as f32)
+            to_file.direction(n.into()).to_array().map(|c| c as f32)
         };
         column("NORMAL", Kind::Vec3, flat(&firsts, unturned));
     }
@@ -291,7 +294,10 @@ fn primitive(
                 true => -1.0,
                 false => 1.0,
             };
-            let [x, y, z] = space.unturn(t.map(f64::from)).map(|c| c as f32);
+            let [x, y, z] = to_file
+                .direction(t.map(f64::from).into())
+                .to_array()
+                .map(|c| c as f32);
             [x, y, z, w]
         };
         column("TANGENT", Kind::Vec4, flat(&firsts, tangent));
@@ -311,7 +317,7 @@ fn primitive(
         let mut rgb: Vec<[f64; 3]> = (firsts.iter())
             .map(|&[p, v, f]| c.get(p, v, f).map(f64::from))
             .collect();
-        out.writing.colors.working_to(LINEAR_SRGB, &mut rgb)?;
+        out.writing.colors.working_to(LIN_REC709, &mut rgb)?;
         let rgb: Vec<[f32; 3]> = rgb.iter().map(|c| c.map(|v| v as f32)).collect();
         match &columns.alpha {
             Some(a) => {

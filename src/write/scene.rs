@@ -8,11 +8,11 @@
 //! light of its intensity facing down its axis, a dome is left out, said.
 use super::Out;
 use crate::gltf::{self, Camera, LightKind, Node, Projection, Scene};
-use crate::read::LINEAR_SRGB;
 use crate::read::scene::FAR;
 use crate::space::{self, Placed};
 use kinogaki_render_api::standard::{Emission, Light, Shape, blackbody, illuminant};
 use kinogaki_render_api::{Projection as Lens, RENDER_SPACE};
+use kinogaki_studio_api::color::LIN_REC709;
 use kinogaki_studio_api::geometry::{Domain, Geometry, Xform, names};
 use kinogaki_studio_api::standard::{self, Instances};
 use kinogaki_studio_api::{Data, Error, FileItem};
@@ -37,7 +37,9 @@ pub(super) fn nodes(items: &[FileItem], out: &mut Out<'_>) -> Result<(), Error> 
         let placed = if framed { Placed::Frame } else { Placed::Value };
         let mut node = Node {
             name: item.name.clone(),
-            transform: space::transform(&out.space.file_placement(&item.placement, placed)),
+            transform: space::transform(
+                space::placed(&out.to_file, &item.placement, placed).rows(),
+            ),
             ..Node::default()
         };
         if let Some(data) = data {
@@ -130,7 +132,7 @@ fn instances(
         let look = looks.and_then(|t| t.get(i)).filter(|k| !k.is_empty());
         let mut node = Node {
             name: named.clone(),
-            transform: space::transform(&out.space.file_placement(xform, Placed::Value)),
+            transform: space::transform(out.to_file.placement(xform).rows()),
             ..Node::default()
         };
         let data = &copies.prototypes()[prototype];
@@ -178,8 +180,8 @@ fn with_look(polygons: &Geometry, look: Option<&str>) -> Result<Geometry, Error>
 /// inverse; none for a dome, said.
 fn light_of(light: &Light, name: &str, out: &mut Out<'_>) -> Result<Option<usize>, Error> {
     let gain = f64::from(light.intensity) * 2f64.powf(f64::from(light.exposure));
-    let space = out.space;
-    let metres = |length: f32| space.metres(f64::from(length));
+    let to_file = out.to_file;
+    let metres = |length: f32| to_file.length(f64::from(length));
     let (kind, intensity) = match light.shape {
         Shape::Dome { .. } => {
             out.warn(format!("{name}: glTF has no dome light; left out"));
@@ -231,7 +233,7 @@ fn light_of(light: &Light, name: &str, out: &mut Out<'_>) -> Result<Option<usize
                 Emission::Illuminant(named) => illuminant(named).unwrap_or([1.0; 3]),
                 _ => blackbody(f64::from(light.color_temperature)),
             }];
-            (out.writing.colors).convert(RENDER_SPACE, LINEAR_SRGB, &mut c)?;
+            (out.writing.colors).convert(RENDER_SPACE, LIN_REC709, &mut c)?;
             c[0]
         }
     };
@@ -261,7 +263,7 @@ fn area_light(light: &Light, gain: f64, area: f64, metres: f64) -> (LightKind, f
 
 /// `camera` as a glTF camera, the read's inverse.
 fn camera_of(camera: &kinogaki_render_api::Camera, name: &str, out: &Out<'_>) -> Camera {
-    let metres = |length: f32| out.space.metres(f64::from(length));
+    let metres = |length: f32| out.to_file.length(f64::from(length));
     let [near, far] = camera.clipping_range;
     let zfar = (far < FAR).then(|| metres(far));
     let projection = match camera.projection {

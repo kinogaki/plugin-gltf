@@ -1,6 +1,7 @@
 //! Studio's standard values to a glTF file: the inverse of the read.
 //!
-//! Each item is a node, placed in glTF's space ([`Space`]) and holding its
+//! Each item is a node, placed in glTF's space (the read's `Conversion`
+//! inverted) and holding its
 //! mesh (`mesh`; a B-rep through the installed mesher), its instances (a
 //! child node an instance), its light or its camera (`scene`); the
 //! materials the polygons name are glTF PBR (`material`). A `.glb` holds
@@ -13,10 +14,10 @@ mod mesh;
 mod scene;
 
 use crate::gltf::{self, Asset, Gltf};
-use crate::read::LINEAR_SRGB;
-use crate::space::Space;
+use crate::space;
 use crate::{TYPES, at_file};
-use kinogaki_studio_api::color::settled;
+use kinogaki_studio_api::color::{LIN_REC709, settled};
+use kinogaki_studio_api::format::Conversion;
 use kinogaki_studio_api::format::files::Beside;
 use kinogaki_studio_api::standard::{self, Materials};
 use kinogaki_studio_api::{
@@ -58,7 +59,7 @@ impl FormatWriter for Writer {
                 ..Gltf::default()
             },
             writing,
-            space: Space::of(writing.units),
+            to_file: space::into_project(writing.units).inverse(),
             held,
             looks: material::Looks::default(),
             warnings: Vec::new(),
@@ -83,7 +84,8 @@ pub(crate) struct Out<'a> {
     /// over another file; none for a GLB, which holds its images.
     beside: Option<Beside>,
     writing: &'a Writing<'a>,
-    space: Space,
+    /// The project's space into glTF's, the read's inverse.
+    to_file: Conversion,
     /// The materials item: what the polygons' keys name.
     held: Option<&'a Materials>,
     looks: material::Looks,
@@ -96,18 +98,18 @@ impl Out<'_> {
         self.warnings.push(Diagnostic::warning(message));
     }
 
-    /// `rgb`, in the working space, in glTF's linear Rec.709. Converted, it
-    /// keeps twelve significant digits (eleven places below 1): a color read
-    /// and written back is the number it was, not one a conversion there and
-    /// back moved in its last bits (glTF's readers hold it in single
-    /// precision).
+    /// `rgb`, in the working space, in glTF's linear Rec.709. Moved by the
+    /// conversion, it keeps twelve significant digits (eleven places below
+    /// 1): a color read and written back is the number it was, not one a
+    /// conversion there and back moved in its last bits (glTF's readers hold
+    /// it in single precision). Unmoved (a working space of linear Rec.709),
+    /// it is as it was.
     fn color(&self, rgb: [f64; 3]) -> Result<[f64; 3], Error> {
-        let colors = self.writing.colors;
-        if colors.working() == LINEAR_SRGB {
-            return Ok(rgb);
-        }
         let mut c = [rgb];
-        colors.working_to(LINEAR_SRGB, &mut c)?;
-        Ok(c[0].map(settled))
+        self.writing.colors.working_to(LIN_REC709, &mut c)?;
+        Ok(match c[0] == rgb {
+            true => rgb,
+            false => c[0].map(settled),
+        })
     }
 }

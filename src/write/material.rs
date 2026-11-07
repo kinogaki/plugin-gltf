@@ -145,9 +145,9 @@ impl Out<'_> {
         let (t, thickness) = self.channel(n, s, "thickness");
         let distance = number(n, s, "attenuation_distance");
         m.volume = gltf::Volume {
-            thickness: self.space.metres(thickness),
+            thickness: self.to_file.length(thickness),
             thickness_texture: self.texture(n, t),
-            attenuation_distance: (distance > 0.0).then(|| self.space.metres(distance)),
+            attenuation_distance: (distance > 0.0).then(|| self.to_file.length(distance)),
             attenuation_color: self.color(color(n, s, "attenuation_color"))?,
         };
         let (t, factor) = self.channel(n, s, "clearcoat");
