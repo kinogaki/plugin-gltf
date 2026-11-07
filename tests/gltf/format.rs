@@ -341,6 +341,72 @@ fn a_mesh_several_nodes_use_is_instances_of_it_held_and_written_once() {
     );
 }
 
+/// An instance of a shared mesh whose `material_map` gives its material
+/// another is written as a mesh of its own in that material; the other
+/// instances keep the one mesh.
+#[test]
+fn an_instances_material_map_writes_its_mesh_in_the_materials_it_maps() {
+    use kinogaki_studio_api::geometry::{Attribute, AttributeType, Text, Values};
+    let path = common::sample("TextureTransformTest", "glTF");
+    let mut read = imported(&path, Units::default());
+    let keys: Vec<String> = (materials(&read).materials.iter())
+        .map(|m| m.key.clone())
+        .collect();
+    // An instance and the material its prototype's polygons name.
+    let (at, own) = (read.items.iter().enumerate())
+        .find_map(|(at, item)| {
+            let copies = standard::instances().get(item.data.as_ref()?)?;
+            let polygons = standard::geometry().get(&copies.prototypes()[0])?;
+            let named = polygons
+                .attributes()
+                .text(Domain::Primitive, names::MATERIAL)?;
+            Some((at, named.get(0)?.to_owned()))
+        })
+        .expect("an instance of a shared mesh");
+    let other = keys
+        .iter()
+        .find(|k| **k != own)
+        .expect("another material")
+        .clone();
+    let copies = standard::instances()
+        .get(read.items[at].data.as_ref().unwrap())
+        .unwrap();
+    let ty = AttributeType {
+        array: true,
+        ..AttributeType::TEXT
+    };
+    let pairs = Values::Text(Text::from_strs([own.as_str(), other.as_str()]));
+    let map = Attribute::arrays(ty, vec![0, 2].into(), pairs).unwrap();
+    let attributes = (copies
+        .attributes()
+        .with(Domain::Instance, names::MATERIAL_MAP, map))
+    .unwrap();
+    let mapped = copies.with_attributes(attributes).unwrap();
+    let name = read.items[at].name.clone();
+    // The material the node's mesh is written in.
+    let material_of = |model: &gltf::Gltf| {
+        let node = (model.nodes.iter())
+            .find(|n| n.name == name)
+            .expect("the node");
+        let mesh = (node.mesh).or_else(|| node.children.first().and_then(|&c| model.nodes[c].mesh));
+        model.meshes[mesh.expect("a mesh")].primitives[0].material
+    };
+    let (plain, _) = written(&read, Units::default(), "Plain.glb");
+    read.items[at].data = Some(standard::instances().wrap(mapped));
+    let (back, _) = written(&read, Units::default(), "Mapped.glb");
+    assert_eq!(
+        back.meshes.len(),
+        plain.meshes.len() + 1,
+        "a mesh for the map"
+    );
+    assert_ne!(
+        material_of(&back),
+        material_of(&plain),
+        "the material it maps to"
+    );
+    assert!(material_of(&back).is_some());
+}
+
 /// What a file's default scene shows: its elements by kind, and the sums of
 /// every corner's place in the world, texture coordinates and color, an
 /// element naming a vertex twice left out.

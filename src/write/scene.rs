@@ -61,10 +61,34 @@ pub(super) fn nodes(items: &[FileItem], out: &mut Out<'_>) -> Result<(), Error> 
     Ok(())
 }
 
-/// The meshes made, by the value (an item's or a prototype's) and the
-/// material standing in for its own.
+/// The meshes made, by the value (an item's or a prototype's) and what
+/// stands in for its own materials.
 #[derive(Default)]
-struct Meshes(HashMap<(usize, Option<String>), Option<usize>>);
+struct Meshes(HashMap<(usize, Instead), Option<usize>>);
+
+/// What an instance renders its prototype's primitives with in place of
+/// their own materials, as a key of the meshes made: one of its own, else
+/// its map's pairs (none: theirs).
+#[derive(Clone, Default, PartialEq, Eq, Hash)]
+struct Instead {
+    look: Option<String>,
+    map: Vec<(String, String)>,
+}
+
+impl Instead {
+    /// What instance `i` of `copies` renders with.
+    fn of(copies: &Instances, i: usize) -> Self {
+        let looks = copies.attributes().text(Domain::Instance, names::MATERIAL);
+        let look = looks.and_then(|t| t.get(i)).filter(|k| !k.is_empty());
+        let map = standard::material_map(copies.attributes(), i);
+        Self {
+            look: look.map(str::to_owned),
+            map: (map.into_iter())
+                .map(|(from, to)| (from.to_owned(), to.to_owned()))
+                .collect(),
+        }
+    }
+}
 
 /// What `data` puts on `node`.
 fn held(
@@ -84,25 +108,26 @@ fn held(
             Some(prototype) => held(prototype, name, node, meshes, out)?,
             None => node.children = instances(copies, name, meshes, out)?,
         }
-    } else if let Some(&mesh) = meshes.0.get(&(data.identity(), None)) {
+    } else if let Some(&mesh) = meshes.0.get(&(data.identity(), Instead::default())) {
         // A value several items share (a glTF mesh several nodes used).
         node.mesh = mesh;
     } else if let Some(polygons) = polygons(data, out) {
         node.mesh = super::mesh::mesh(&polygons, name, out)?;
-        meshes.0.insert((data.identity(), None), node.mesh);
+        meshes
+            .0
+            .insert((data.identity(), Instead::default()), node.mesh);
     } else {
         out.warn(format!("{name}: glTF holds no {}; left out", data.ty()));
     }
     Ok(())
 }
 
-/// The one prototype `copies` places where it is, in its own material: what
-/// the node holds itself.
+/// The one prototype `copies` places where it is, in its own materials:
+/// what the node holds itself.
 fn here(copies: &Instances) -> Option<&Data> {
-    let looks = copies.attributes().text(Domain::Instance, names::MATERIAL);
-    let own = looks.is_none_or(|t| t.get(0).is_none_or(str::is_empty));
     let here = copies.xforms().as_slice() == [Xform::IDENTITY];
-    (here && own).then(|| &copies.prototypes()[copies.prototype_index(0)])
+    (here && Instead::of(copies, 0) == Instead::default())
+        .then(|| &copies.prototypes()[copies.prototype_index(0)])
 }
 
 /// `data` as polygons: its own, or as the installed mesher makes them.
@@ -122,14 +147,12 @@ fn instances(
 ) -> Result<Vec<usize>, Error> {
     let attributes = copies.attributes();
     let names = attributes.text(Domain::Instance, names::NAME);
-    let looks = attributes.text(Domain::Instance, names::MATERIAL);
     let mut children = Vec::with_capacity(copies.len());
     for (i, xform) in copies.xforms().iter().enumerate() {
         out.writing.check()?;
         let prototype = copies.prototype_index(i);
         let named = names.and_then(|t| t.get(i)).filter(|n| !n.is_empty());
         let named = named.map_or_else(|| format!("{name} {i}"), str::to_owned);
-        let look = looks.and_then(|t| t.get(i)).filter(|k| !k.is_empty());
         let mut node = Node {
             name: named.clone(),
             transform: space::transform(out.to_file.placement(xform).rows()),
@@ -139,14 +162,16 @@ fn instances(
         if let Some(nested) = standard::instances().get(data) {
             node.children = instances(nested, &named, meshes, out)?;
         } else {
-            let key = (data.identity(), look.map(str::to_owned));
+            let instead = Instead::of(copies, i);
+            let key = (data.identity(), instead.clone());
             node.mesh = match meshes.0.get(&key) {
                 Some(&mesh) => mesh,
                 None => {
                     let mesh = match polygons(data, out) {
                         Some(polygons) => {
-                            let polygons = with_look(&polygons, look)?;
-                            super::mesh::mesh(&polygons, &named, out)?
+                            let rendered =
+                                standard::instance_materials(&polygons, copies.attributes(), i)?;
+                            super::mesh::mesh(rendered.as_ref().unwrap_or(&polygons), &named, out)?
                         }
                         None => None,
                     };
@@ -159,21 +184,6 @@ fn instances(
         children.push(out.model.nodes.len() - 1);
     }
     Ok(children)
-}
-
-/// `polygons` with every primitive's `material` `look`, when one stands in.
-fn with_look(polygons: &Geometry, look: Option<&str>) -> Result<Geometry, Error> {
-    let Some(look) = look else {
-        return Ok(polygons.clone());
-    };
-    let count = polygons.primitives().len();
-    let text = kinogaki_studio_api::geometry::Text::from_strs(std::iter::repeat_n(look, count));
-    let attributes = (polygons.attributes()).with(
-        Domain::Primitive,
-        names::MATERIAL,
-        kinogaki_studio_api::geometry::Attribute::text(text),
-    )?;
-    polygons.with_attributes(attributes)
 }
 
 /// `light` as a `KHR_lights_punctual` light (its index), the read's
