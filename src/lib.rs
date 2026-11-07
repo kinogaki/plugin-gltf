@@ -18,7 +18,6 @@ use kinogaki_studio_api::{
     DataTypeId, Error, FileFormat, FormatId, FormatOptions, FormatWriter, Imported, Input, Package,
     PackageId, Purpose, Reading, Value, standard,
 };
-use std::sync::LazyLock;
 
 /// The package's id.
 pub fn id() -> PackageId {
@@ -37,15 +36,13 @@ pub fn package() -> Package {
 
 /// What a read makes and a write takes: materials, polygons, instances of
 /// shared meshes, lights and cameras.
-static TYPES: LazyLock<[DataTypeId; 5]> = LazyLock::new(|| {
-    [
-        standard::materials().id(),
-        standard::geometry().id(),
-        standard::instances().id(),
-        standard::light().id(),
-        standard::CAMERA,
-    ]
-});
+const TYPES: &[DataTypeId] = &[
+    standard::materials().id(),
+    standard::geometry().id(),
+    standard::instances().id(),
+    standard::light().id(),
+    standard::camera().id(),
+];
 
 /// The format: `.gltf` with the files beside it, and `.glb`.
 pub struct Format;
@@ -65,7 +62,7 @@ impl FileFormat for Format {
         head.starts_with(b"glTF")
     }
     fn produces(&self) -> &[DataTypeId] {
-        &*TYPES
+        TYPES
     }
     /// Embed Textures, off: images a `.gltf` names beside it stay paths.
     fn options(&self) -> FormatOptions {

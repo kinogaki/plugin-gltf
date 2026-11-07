@@ -30,7 +30,7 @@ pub(crate) struct Writer;
 
 impl FormatWriter for Writer {
     fn accepts(&self) -> &[DataTypeId] {
-        &*TYPES
+        TYPES
     }
 
     /// `items` as a GLB for `.glb`, else `.gltf` text with its buffer and

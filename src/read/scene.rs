@@ -17,8 +17,7 @@ use kinogaki_render_api::{Camera, Projection as Lens};
 use kinogaki_studio_api::color::{ColorService, LIN_REC709};
 use kinogaki_studio_api::format::Conversion;
 use kinogaki_studio_api::geometry::{Attributes, Xform};
-use kinogaki_studio_api::render::lights::light_value;
-use kinogaki_studio_api::standard::{self, Instances, lens};
+use kinogaki_studio_api::standard::{self, Instances};
 use kinogaki_studio_api::{Data, Diagnostic, Error, FileItem};
 
 /// A point or spot light's radius, metres.
@@ -50,14 +49,14 @@ pub(super) fn items(
         if let Some(c) = node.camera {
             let camera = &model.cameras[c];
             let named = or(&camera.name, "Camera");
-            held.push((named, standard::camera().wrap(camera_value(camera, space)?)));
+            held.push((named, standard::camera().wrap(camera_value(camera, space))?));
         }
         if let Some(l) = node.light {
             let light = &model.lights[l];
             ranges += usize::from(light.range.is_some());
             let named = or(&light.name, "Light");
             let value = light_of(light, space, colors)?;
-            held.push((named, standard::light().wrap(value)));
+            held.push((named, standard::light().wrap(value)?));
         }
         let name = match (node.name.trim(), mesh) {
             ("", Some((m, _))) => or(&model.meshes[m].name, "Node"),
@@ -183,7 +182,7 @@ fn light_of(
             light.intensity / sphere,
         ),
     };
-    light_value(Light {
+    Ok(Light {
         shape,
         color: color[0].map(|c| c as f32),
         intensity: intensity as f32,
@@ -193,9 +192,9 @@ fn light_of(
 }
 
 /// `camera` as a standard camera's lens in `space`.
-fn camera_value(camera: &gltf::Camera, space: &Conversion) -> Result<Camera, Error> {
+fn camera_value(camera: &gltf::Camera, space: &Conversion) -> Camera {
     let near = |znear: f64| (space.length(znear) as f32).max(f32::MIN_POSITIVE);
-    let lensed = match camera.projection {
+    match camera.projection {
         Projection::Perspective {
             yfov,
             aspect_ratio,
@@ -221,6 +220,5 @@ fn camera_value(camera: &gltf::Camera, space: &Conversion) -> Result<Camera, Err
             clipping_range: [near(znear), space.length(zfar) as f32],
             ..Camera::default()
         },
-    };
-    lens(lensed)
+    }
 }

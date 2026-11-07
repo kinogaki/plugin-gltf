@@ -335,7 +335,7 @@ impl Out<'_> {
     fn texture(&mut self, n: &MaterialNetwork, at: Option<u32>) -> Option<TextureRef> {
         let at = at.filter(|&t| is_texture(n, t))?;
         let kind = node(n, at);
-        let (image, extended) = self.image(n.nodes()[at as usize].images.get("file")?)?;
+        let (image, extended) = self.image(n.nodes()[at as usize].images().get("file")?)?;
         let text = |input: &str| choice(n, at, input);
         let (u, v, filter) = match kind {
             "UsdUVTexture" => (text("wrapS"), text("wrapT"), String::new()),
@@ -517,7 +517,7 @@ fn without_effect(m: &mut gltf::Material) {
 
 /// The MaterialX node `at` is (`gltf_pbr`); empty for another.
 fn node(n: &MaterialNetwork, at: u32) -> &str {
-    (n.nodes()[at as usize].def.mtlx()).map_or("", |d| d.node.as_str())
+    (n.nodes()[at as usize].def().mtlx()).map_or("", |d| d.node.as_str())
 }
 
 /// Whether node `at` is a texture node glTF reads.
@@ -533,13 +533,13 @@ fn driver<'n>(n: &'n MaterialNetwork, at: u32, input: &str) -> Option<(u32, &'n 
 }
 
 fn number(n: &MaterialNetwork, at: u32, input: &str) -> f64 {
-    (n.nodes()[at as usize].values.get(input))
+    (n.nodes()[at as usize].values().get(input))
         .and_then(Value::number)
         .unwrap_or(0.0)
 }
 
 fn numbers(n: &MaterialNetwork, at: u32, input: &str) -> Vec<f64> {
-    match n.nodes()[at as usize].values.get(input) {
+    match n.nodes()[at as usize].values().get(input) {
         Some(Value::Numbers(v)) => v.clone(),
         Some(Value::Color(c)) => c.to_vec(),
         Some(Value::Number(v)) => vec![*v],
@@ -559,13 +559,13 @@ fn factor(n: &MaterialNetwork, at: u32) -> [f64; 3] {
 }
 
 fn integer(n: &MaterialNetwork, at: u32, input: &str) -> i64 {
-    (n.nodes()[at as usize].values.get(input))
+    (n.nodes()[at as usize].values().get(input))
         .and_then(Value::integer)
         .unwrap_or(0)
 }
 
 fn choice(n: &MaterialNetwork, at: u32, input: &str) -> String {
-    match n.nodes()[at as usize].values.get(input) {
+    match n.nodes()[at as usize].values().get(input) {
         Some(Value::Choice(c)) => c.to_string(),
         Some(Value::Text(t)) => t.clone(),
         _ => String::new(),
