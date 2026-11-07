@@ -158,9 +158,9 @@ fn light_of(
     let radius = space.length(RADIUS) as f32;
     let sphere = std::f64::consts::PI * RADIUS * RADIUS;
     let (shape, intensity) = match light.kind {
-        LightKind::Directional => (Shape::Distant { angle: 0.0 }, light.intensity),
+        LightKind::Directional => (LightShape::Distant { angle: 0.0 }, light.intensity),
         LightKind::Point => (
-            Shape::Spot {
+            LightShape::Spot {
                 radius,
                 cone_angle: 180.0,
                 cone_softness: 0.0,
@@ -171,7 +171,7 @@ fn light_of(
             inner_cone_angle,
             outer_cone_angle,
         } => (
-            Shape::Spot {
+            LightShape::Spot {
                 radius,
                 cone_angle: outer_cone_angle.to_degrees() as f32,
                 cone_softness: match outer_cone_angle > 0.0 {

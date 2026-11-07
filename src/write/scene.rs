@@ -10,7 +10,7 @@ use super::Out;
 use crate::gltf::{self, Camera, LightKind, Node, Projection, Scene};
 use crate::read::scene::FAR;
 use crate::space::{self, Placed};
-use kinogaki_render_api::standard::{Emission, Light, Shape, blackbody, illuminant};
+use kinogaki_render_api::standard::{Emission, Light, LightShape, blackbody, illuminant};
 use kinogaki_render_api::{Projection as Lens, RENDER_SPACE};
 use kinogaki_studio_api::color::LIN_REC709;
 use kinogaki_studio_api::geometry::{Domain, Geometry, Xform, names};
@@ -193,11 +193,11 @@ fn light_of(light: &Light, name: &str, out: &mut Out<'_>) -> Result<Option<usize
     let to_file = out.to_file;
     let metres = |length: f32| to_file.length(f64::from(length));
     let (kind, intensity) = match light.shape {
-        Shape::Dome { .. } => {
+        LightShape::Dome { .. } => {
             out.warn(format!("{name}: glTF has no dome light; left out"));
             return Ok(None);
         }
-        Shape::Distant { angle } => {
+        LightShape::Distant { angle } => {
             let half = f64::from(angle).to_radians() / 2.0;
             let disk = match angle > 0.0 && !light.normalize {
                 true => PI * half.sin().powi(2),
@@ -205,7 +205,7 @@ fn light_of(light: &Light, name: &str, out: &mut Out<'_>) -> Result<Option<usize
             };
             (LightKind::Directional, gain * disk)
         }
-        Shape::Spot {
+        LightShape::Spot {
             radius,
             cone_angle,
             cone_softness,
@@ -225,12 +225,12 @@ fn light_of(light: &Light, name: &str, out: &mut Out<'_>) -> Result<Option<usize
             };
             (kind, radiance * PI * r * r)
         }
-        Shape::Rect { width, height } => {
+        LightShape::Rect { width, height } => {
             out.warn(format!("{name}: an area light written as a spot light"));
             let area = f64::from(width) * f64::from(height);
             area_light(light, gain, area, metres(width) * metres(height))
         }
-        Shape::Disk { radius } => {
+        LightShape::Disk { radius } => {
             out.warn(format!("{name}: an area light written as a spot light"));
             let area = PI * f64::from(radius).powi(2);
             area_light(light, gain, area, PI * metres(radius).powi(2))
