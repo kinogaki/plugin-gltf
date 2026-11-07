@@ -1,0 +1,21 @@
+[package]
+name = "kinogaki-gltf"
+description = "glTF 2.0 and GLB as a format plugin for Kinogaki Studio: the file's own model, its reader and its writer, with the KHR extensions for materials, texture transforms and punctual lights"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+publish = false
+license = "MIT OR Apache-2.0"
+
+# The format builds from its own repository alone: the reader and writer
+# (`src/gltf/`) use nothing but the standard library, JSON and base64
+# included.
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+
+[profile.release]
+lto = "thin"
