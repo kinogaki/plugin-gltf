@@ -16,6 +16,7 @@ use crate::gltf::{self, Asset, Gltf};
 use crate::read::LINEAR_SRGB;
 use crate::space::Space;
 use crate::{TYPES, at_file};
+use kinogaki_studio_api::color::settled;
 use kinogaki_studio_api::format::files::Beside;
 use kinogaki_studio_api::standard::{self, Materials};
 use kinogaki_studio_api::{
@@ -108,31 +109,5 @@ impl Out<'_> {
         let mut c = [rgb];
         colors.working_to(LINEAR_SRGB, &mut c)?;
         Ok(c[0].map(settled))
-    }
-}
-
-/// `v` to twelve significant digits, or eleven places below 1 (a zero
-/// stays zero, not a conversion's 10⁻¹⁸).
-fn settled(v: f64) -> f64 {
-    if !v.is_finite() {
-        return v;
-    }
-    let scale = 10f64.powi(11 - v.abs().max(1.0).log10().floor() as i32);
-    // + 0.0: never a negative zero.
-    (v * scale).round() / scale + 0.0
-}
-
-#[cfg(test)]
-mod tests {
-    use super::settled;
-
-    #[test]
-    fn a_converted_color_settles_where_a_conversion_left_its_last_bits() {
-        assert_eq!(settled(0.9999999999999963), 1.0);
-        assert_eq!(settled(1.0000000000000038), 1.0);
-        let zero = settled(-3.4694469519500004e-18);
-        assert!(zero == 0.0 && zero.is_sign_positive(), "{zero}");
-        assert_eq!(settled(0.25), 0.25);
-        assert_eq!(settled(123.456_789_012_345_6), 123.456_789_012);
     }
 }

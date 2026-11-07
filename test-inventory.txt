@@ -69,4 +69,3 @@ kinogaki-gltf/lib test gltf::uri::tests::uris_sort_into_data_and_relative_paths
 kinogaki-gltf/lib test gltf::write::tests::image_files_are_named_after_their_images_and_never_twice
 kinogaki-gltf/lib test space::tests::a_shear_stays_a_matrix_and_a_mirror_a_negative_scale
 kinogaki-gltf/lib test space::tests::placements_move_into_the_projects_space_and_back
-kinogaki-gltf/lib test write::tests::a_converted_color_settles_where_a_conversion_left_its_last_bits
