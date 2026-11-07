@@ -329,6 +329,15 @@ pub struct Image {
     pub data: ImageData,
 }
 
+impl Image {
+    /// The extension of its media type's files (`png`, `jpg`, `ktx2`,
+    /// `webp`, `avif`); none for another type, or none given.
+    pub fn extension(&self) -> Option<&'static str> {
+        let extension = super::super::uri::extension(self.mime_type.as_deref()?);
+        (extension != "bin").then_some(extension)
+    }
+}
+
 /// Where an image's file is.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ImageData {

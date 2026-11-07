@@ -82,6 +82,56 @@ pub enum Transform {
     },
 }
 
+impl Transform {
+    /// The transform as a matrix, column by column (`matrix`'s layout).
+    pub fn matrix(&self) -> [f64; 16] {
+        let (t, [x, y, z, w], s) = match *self {
+            Transform::Matrix(m) => return m,
+            Transform::Trs {
+                translation,
+                rotation,
+                scale,
+            } => (translation, rotation, scale),
+        };
+        // The rotation's columns, each scaled.
+        let r = [
+            [
+                1.0 - 2.0 * (y * y + z * z),
+                2.0 * (x * y + z * w),
+                2.0 * (x * z - y * w),
+            ],
+            [
+                2.0 * (x * y - z * w),
+                1.0 - 2.0 * (x * x + z * z),
+                2.0 * (y * z + x * w),
+            ],
+            [
+                2.0 * (x * z + y * w),
+                2.0 * (y * z - x * w),
+                1.0 - 2.0 * (x * x + y * y),
+            ],
+        ];
+        [
+            r[0][0] * s[0],
+            r[0][1] * s[0],
+            r[0][2] * s[0],
+            0.0,
+            r[1][0] * s[1],
+            r[1][1] * s[1],
+            r[1][2] * s[1],
+            0.0,
+            r[2][0] * s[2],
+            r[2][1] * s[2],
+            r[2][2] * s[2],
+            0.0,
+            t[0],
+            t[1],
+            t[2],
+            1.0,
+        ]
+    }
+}
+
 impl Default for Transform {
     fn default() -> Self {
         Transform::Trs {

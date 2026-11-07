@@ -1,7 +1,6 @@
 //! The Khronos sample assets read as their READMEs describe them.
-mod common;
 
-use common::{read, read_bytes, sample, samples};
+use crate::common::{read, read_bytes, sample, samples};
 use kinogaki_gltf::gltf::{
     self, AlphaMode, ImageData, Kind, LeftOut, LightKind, MagFilter, MinFilter, Projection,
     ReadOptions, TextureTransform, Topology, Wrap,

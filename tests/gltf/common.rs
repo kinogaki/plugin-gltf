@@ -1,5 +1,4 @@
 //! The Khronos sample assets committed under `tests/fixtures/khronos`.
-#![allow(dead_code)]
 use kinogaki_gltf::gltf::{self, Gltf, ImageData, ReadOptions};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -40,9 +39,13 @@ pub fn sample(model: &str, variant: &str) -> PathBuf {
 
 /// The sample read with images embedded.
 pub fn read(model: &str, variant: &str) -> Gltf {
-    let path = sample(model, variant);
+    read_path(&sample(model, variant))
+}
+
+/// The file at `path` read with images embedded.
+pub fn read_path(path: &Path) -> Gltf {
     gltf::read_file(
-        &path,
+        path,
         &ReadOptions {
             embed_images: true,
             ..ReadOptions::default()

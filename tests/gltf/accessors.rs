@@ -1,8 +1,7 @@
 //! Accessors decode every component type, normalized or not, packed or
 //! strided, matrices with padded columns, and sparse over zeros.
-mod common;
 
-use common::{primitive, read_bytes};
+use crate::common::{primitive, read_bytes};
 use kinogaki_gltf::gltf::{Gltf, Kind};
 
 fn values(model: &Gltf, name: &str) -> Vec<f32> {

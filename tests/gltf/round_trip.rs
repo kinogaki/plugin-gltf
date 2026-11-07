@@ -1,9 +1,8 @@
 //! What is written reads back as the same model: every sample (so its
 //! materials are lossless), a model setting every field, and the writer's
 //! own output byte for byte.
-mod common;
 
-use common::{read, read_bytes, samples, written_and_read};
+use crate::common::{read, read_bytes, samples, written_and_read};
 use kinogaki_gltf::gltf::{
     self, AlphaMode, Anisotropy, Attribute, Camera, Clearcoat, Gltf, GltfError, Image, ImageData,
     Iridescence, Kind, Light, LightKind, MagFilter, Material, Mesh, MinFilter, Node, Primitive,
@@ -117,7 +116,7 @@ fn a_model_that_cant_be_written_is_refused_naming_where() {
 /// (which the validator doesn't read), no volume on a double-sided
 /// material, every light used, no textured lines.
 #[test]
-#[ignore = "writes files for the local validator"]
+#[ignore = "hand: writes files for the local validator"]
 fn hand_run_write_the_model_setting_every_field_for_the_validator() {
     const PNG: [u8; 70] = [
         0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,

@@ -1,6 +1,6 @@
 # glTF
 
-glTF 2.0 and GLB for [Kinogaki Studio](https://github.com/kinogaki): the file's own model, its reader and its writer. The library crate is `kinogaki-gltf`; its `gltf` module knows no SDK and uses nothing but the standard library (its JSON and base64 are its own). The format on Studio's public [studio-sdk](https://github.com/kinogaki/studio-sdk) converts between this model and Studio's standard values: geometry, MaterialX glTF PBR materials, Image nodes, lights and cameras.
+glTF 2.0 and GLB for [Kinogaki Studio](https://github.com/kinogaki), a format plugin on Studio's public [studio-sdk](https://github.com/kinogaki/studio-sdk): File ▸ Import and Export of `.gltf` and `.glb`, and the File node. The library crate `kinogaki-gltf` holds the file's own model, its reader and its writer (the `gltf` module, which knows no SDK and uses nothing but the standard library; its JSON and base64 are its own) and the format, which converts between that model and Studio's standard values: polygons, MaterialX glTF PBR materials with Image nodes, lights and cameras. `plugin/` (`kinogaki-plugin-gltf`) is the library Studio loads, `formats/gltf.dylib`; the package is `kinogaki.gltf`, the format `kinogaki.format.gltf`.
 
 ```rust
 use kinogaki_gltf::gltf::{self, ReadOptions};
@@ -12,9 +12,21 @@ for material in &model.materials {
 gltf::write_file(&model, &out.join("copy.glb"))?;
 ```
 
+## In Studio
+
+**Import** gives the materials item first (when the file has materials), then the default scene's node tree, parents first. Everything moves from glTF's metres, +Y up, into the project's units and up axis: positions and lengths scaled, directions turned, and each placement turned so it carries no scale of units.
+
+- **Materials** become a Material Library: a Material each, double sided as the file says, holding a MaterialX network. glTF PBR (`ND_gltf_pbr_surfaceshader`) takes every field and ratified extension in the input of the same meaning; `KHR_materials_unlit` is Surface Unlit Cutout (`kinogaki_surface_unlit`, with glTF's alpha mode and cutoff). A texture is a Kinogaki glTF texture node (`kinogaki_gltf_image`, `kinogaki_gltf_colorimage`, …, MaterialX's with glTF's minification filter and an undefined filter) holding its sampler's wraps and filters and its `KHR_texture_transform` (the rotation in degrees), a `texcoord` node wired in for a set past the first, and an Image node wired into its `file`: one Image node a distinct image and color reading in a material, a color texture read as tagged and the others as data. A channel glTF packs is read through `extract` (metallic in B, roughness in G, specular in A…), a normal texture through `normalmap` with its scale, occlusion through a `mix` with 1 at its strength, and the base color times the vertex colors through `geomcolor` where a primitive has `COLOR_0`. Colors move from linear Rec.709 into the working space.
+- **Images** packed in the file (a GLB's buffer, a `data:` URI) are embedded, their bytes copied out of the file (so the file's geometry isn't kept with them); images named beside a `.gltf` stay paths, absolute, or are read in with **Embed Textures**. Nothing is decoded: KTX2, WebP and AVIF stay embedded as they are, and a texture with both reads its PNG or JPEG source.
+- **Meshes** become polygons, one value a mesh: each primitive's vertices points of their own, triangles polygons, lines two-point polylines, points alone points; a triangle naming a vertex twice is left out, said. Point attributes: `N`, `uv` (`TEXCOORD_n` is `uv<n+1>`, v turned up as MaterialX's coordinates run), `Cd` and `Alpha` (`COLOR_0`), `tangentu` and `tangentv` (`TANGENT` and its bitangent), and the file's own `_NAME` attributes; the primitive `material` names each face's Material. A mesh without normals has every edge sharp, so it shades flat as glTF says. A mesh several nodes use is one value their objects share.
+- **Nodes** are Parts, or the object of their mesh, camera or light. `KHR_lights_punctual`: a point light is a spot light of 180° and 1 mm radius, a spot light a spot of its outer cone softened over the share outside its inner one, a directional light a distant light; candela and lux are illuminance at a metre (a sphere's radiance is its candela over its projected area); a light's range is left out, said. Cameras: `yfov` on a 24 mm high film back, `xmag` and `ymag` as the view's size; no far distance is the farthest a camera clips.
+- **Left out, and said:** animations (a file reads at rest), skins (bind pose), morph targets (applied at their default weights), `extras`, `KHR_materials_variants`, other scenes than the default.
+
+**Export** is the inverse: each item a node (a value several items share written once), a mesh a primitive of triangles for each material its polygons name (triangles as they are, other polygons through the display triangulation every engine shows) and one of lines; a glTF vertex is a point where every attribute written lives on points, else a point with each distinct set of corner values. `N` is written as authored on points, else as the shading normals Studio shows. glTF PBR and Surface Unlit are written as recorded; another MaterialX model is translated into glTF PBR (`standard_surface_to_gltf_pbr`, through Standard Surface from OpenPBR, folded), an engine's own material through its standard form, said. Images are written once each, PNG and JPEG as a texture's `source`, KTX2, WebP and AVIF as its extension's; another (an OpenEXR) is left out, said. A converted color keeps twelve significant digits, so one read and written back is the number it was. An area light is written as a spot light, a dome is left out, said. `.glb` holds its images and buffer; `.gltf` names them beside it. The writer sets `asset.generator` to "Kinogaki Studio".
+
 ## The model
 
-`Gltf` keeps glTF's own objects and their indices (scenes, nodes, meshes, materials, textures, samplers, images, cameras, lights), so a file reads and writes back structurally. It hides only the encoding: buffers, buffer views and accessors become typed arrays on the primitives, and images their files' bytes or paths. Material fields carry MaterialX's `gltf_pbr` names (`base_color`, `metallic`, `emissive_strength`, `clearcoat.roughness`), each documented with the glTF property it holds; an extension's fields sit in a struct whose `Default` is the extension absent.
+The `gltf` module's `Gltf` keeps glTF's own objects and their indices (scenes, nodes, meshes, materials, textures, samplers, images, cameras, lights), so a file reads and writes back structurally. It hides only the encoding: buffers, buffer views and accessors become typed arrays on the primitives, and images their files' bytes or paths. Material fields carry MaterialX's `gltf_pbr` names (`base_color`, `metallic`, `emissive_strength`, `clearcoat.roughness`), each documented with the glTF property it holds; an extension's fields sit in a struct whose `Default` is the extension absent.
 
 ## Reading
 
@@ -38,24 +50,30 @@ gltf::write_file(&model, &out.join("copy.glb"))?;
 
 | File | Role |
 |---|---|
+| `src/lib.rs` | The package and the format: ids, options (Embed Textures), the reader and writer |
+| `src/read/` | The model to standard values: `mod.rs` (the read, images), `material.rs` (glTF PBR and Surface Unlit Cutout networks), `mesh.rs` (polygons and their attributes), `scene.rs` (the node tree, lights, cameras) |
+| `src/write/` | Standard values to the model: `mod.rs` (the write), `material.rs` (networks to glTF PBR, translated where needed; images, textures, samplers), `mesh.rs` (primitives and their vertices), `scene.rs` (nodes, instances, lights, cameras) |
+| `src/space.rs` | glTF's metres, +Y up, and the project's space, for values and placements |
 | `src/gltf/model/` | `Gltf` and its objects: `mod.rs` (scene, nodes, cameras, lights, what was left out), `mesh.rs`, `material.rs` (materials, textures, samplers, images) |
 | `src/gltf/read/` | `mod.rs` (the read, top-down; buffers; images), `fields.rs` (typed JSON members with their paths), `accessor.rs` (views and accessors), `mesh.rs`, `material.rs`, `scene.rs` |
 | `src/gltf/write/` | `mod.rs` (the document; image files), `binary.rs` (the buffer, its views and accessors), `material.rs`, `scene.rs` |
 | `src/gltf/json/` | JSON text to a value tree (strings without escapes borrowed, scanned eight bytes at a time) and back |
 | `src/gltf/base64.rs`, `uri.rs`, `glb.rs` | `data:` URIs, relative paths and image types; the GLB container |
+| `plugin/` | The dylib Studio loads |
 
 ## Tests and data
 
-`cargo test` runs:
+`cargo test` runs one binary of tests, `tests/gltf/` (`common.rs` the samples it reads):
 
-- `tests/samples.rs`: every sample reads, saying what it leaves out; sparse accessors, primitive modes, morph targets at default weights, interleaved views, samplers, texture transforms, cameras, lights and every material extension read as the samples' READMEs describe;
-- `tests/round_trip.rs`: every sample, and a model setting every field, written as a GLB and as a `.gltf` reads back as the same model (so its materials are lossless); writing is byte-for-byte repeatable; a model that can't be written is refused naming where;
-- `tests/accessors.rs`: component types, normalization, strides, padded matrix columns and sparse accessors on hand-made buffers;
-- `tests/robust.rs`: every cut of the small samples is an error; 6,400 mutations (digits, large numbers, flipped bits) read or fail without panicking; structural faults name their place; budgets and cancellation.
+- `tests/gltf/format.rs`, the format on the SDK: a textured box imports its glTF PBR network with an Image node into the base color's texture (a path, packed bytes, a `data:` URI) and its mesh; Embed Textures reads the image beside into the project; every sample written as a GLB and as a `.gltf` reads back with the same materials (each texture by its image's bytes and sampler) and the same meshes where they were; a project in millimetres, Z up, holds the file where its axes put it and writes it back as it was; a mesh several nodes use is one value written once; texture transforms and samplers are the texture nodes' values; unlit materials are Surface Unlit Cutout; lights and cameras import as standard values and write back; a File node reads one value; damaged files are errors and a cancelled read stops;
+- `tests/gltf/samples.rs`: every sample reads, saying what it leaves out; sparse accessors, primitive modes, morph targets at default weights, interleaved views, samplers, texture transforms, cameras, lights and every material extension read as the samples' READMEs describe;
+- `tests/gltf/round_trip.rs`: every sample, and a model setting every field, written as a GLB and as a `.gltf` reads back as the same model; writing is byte-for-byte repeatable; a model that can't be written is refused naming where;
+- `tests/gltf/accessors.rs`: component types, normalization, strides, padded matrix columns and sparse accessors on hand-made buffers;
+- `tests/gltf/robust.rs`: every cut of the small samples is an error; 6,400 mutations (digits, large numbers, flipped bits) read or fail without panicking; structural faults name their place; budgets and cancellation.
 
-Two tests run by hand: `hand_run_fetched_samples_read_and_write_back_the_same` reads the samples `tools/fetch_samples.sh` fetches, and `hand_run_write_the_model_setting_every_field_for_the_validator` writes that model into `$GLTF_OUT`.
+Three tests run by hand: `hand_run_fetched_samples_read_and_write_back_the_same` reads the samples `tools/fetch_samples.sh` fetches, and `hand_run_write_the_model_setting_every_field_for_the_validator` and `hand_run_write_every_sample_through_the_format_for_the_validator` write into `$GLTF_OUT`. Studio's tree imports every sample through the editor, exports and reads them again, and renders an imported textured asset (its `workflows/`).
 
-**Validation.** The Khronos [glTF-Validator](https://github.com/KhronosGroup/glTF-Validator), installed locally from npm (`gltf-validator`) and never a dependency, checks what the writer writes: `examples/rewrite.rs` writes each sample back as a GLB and a `.gltf`, and `tools/validate.mjs` validates them. Every written file has no errors; the only warnings (normal maps on primitives without tangents) are the source files' own. The validator release used (2.0.0-dev.3.10) doesn't know `KHR_texture_basisu`, so the model written for it has no KTX2 image.
+**Validation.** The Khronos [glTF-Validator](https://github.com/KhronosGroup/glTF-Validator), installed locally from npm (`gltf-validator`) and never a dependency, checks what the writer writes: `examples/rewrite.rs` writes each sample back as a GLB and a `.gltf` from the model, the hand-run format test writes each through Studio's values, and `tools/validate.mjs` validates them. Every written file has no errors; the only warnings (normal maps on primitives without tangents) are the source files' own. The validator release used (2.0.0-dev.3.10) doesn't know `KHR_texture_basisu`, so the model written for it has no KTX2 image.
 
 **Test data.** `tests/fixtures/khronos/` holds models from the Khronos [glTF-Sample-Assets](https://github.com/KhronosGroup/glTF-Sample-Assets) (commit `8f492390ddc7a2ae221a1369ef560589cf8c70fb`), each with its own `LICENSE.md` and `metadata.json`, and the licence texts they cite in `LICENSES/`. The marks in BoxTextured and MultiUVTest are their owners' and are used under their guidelines; the model licences grant no rights in them.
 
@@ -94,25 +112,29 @@ Two samples are fetched rather than committed, for the hand-run test: DamagedHel
 
 ## Performance
 
-`cargo run --release --example bench`, Apple M4 Max under other work, the first of seven runs and the best:
+`cargo run --release -p kinogaki-gltf --example bench` in Studio's tree, Apple M4 Max under other sessions' load (load average 30 to 55), the first of seven runs and the best. The budgets are for a file into Studio's standard values and back; the model's share is the bytes to the model and back.
 
-| | First | Best | Budget |
-|---|---|---|---|
-| A 1M-triangle GLB (positions, normals, UVs; 26 MB) read into the model | 6.1 ms | 2.8 ms | 40 ms |
-| The same as a `.gltf` of a base64 `data:` URI (35 MB) read | 16.3 ms | 12.8 ms | 80 ms |
-| A GLB of 200 MB of images read (copied, not decoded) | 6.7 ms | 2.8 ms | 30 ms |
-| The 1M-triangle model written as a GLB | 4.5 ms | 3.4 ms | 60 ms |
+| | First | Best | The model's share, best | Budget |
+|---|---|---|---|---|
+| A 1M-triangle GLB (positions, normals, UVs; 26 MB) read from its file into standard values | 13.7 ms | 11.5 ms | 3.1 ms | 40 ms |
+| The same as a `.gltf` of a base64 `data:` URI (35 MB) | 27.5 ms | 22.8 ms | 13.3 ms | 80 ms |
+| A GLB of 200 MB of images (copied, not decoded) | 16.6 ms | 15.1 ms | 3.2 ms | 30 ms |
+| The 1M-triangle polygons written to a GLB file | 21.5 ms | 19.7 ms | 3.3 ms | 60 ms |
 
-The budgets are for a file into Studio's standard values; these times are the model's share of them.
+A first run under the heaviest load read the GLB in up to 57 ms; the best stays at 11.5 ms.
 
 ## Building
 
-The crate builds from this repository alone with the compiler Studio's SDK pins (`rust-toolchain.toml` there; 1.98.1):
+The format builds from this repository and the public SDK's alone, checked out side by side as Studio's tree lays them out (`sdk/` and `plugins/gltf/`), with the compiler the SDK pins (`sdk/rust-toolchain.toml`; 1.98.1):
 
 ```sh
+git clone https://github.com/kinogaki/studio-sdk sdk
+git clone https://github.com/kinogaki/plugin-gltf plugins/gltf
+cd plugins/gltf
 cargo test
-cargo run --release --example bench
 ```
+
+`plugin/` is the library Studio loads. It links Studio's shared library (`kinogaki_shared`), so it is built in Studio's tree, or against a Studio release's plugin kit as the SDK's guides describe.
 
 ## License
 

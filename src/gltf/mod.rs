@@ -31,3 +31,15 @@ pub use error::GltfError;
 pub use model::*;
 pub use read::{EXTENSIONS, ReadOptions, read, read_file};
 pub use write::{GltfFiles, to_glb, to_gltf, write_file};
+
+/// The media type a file name's extension says (`image/png` of
+/// `wood.PNG`): PNG, JPEG, KTX2, WebP or AVIF.
+pub fn media_type(name: &str) -> Option<&'static str> {
+    uri::by_extension(name)
+}
+
+/// The media type an image's first bytes say: PNG, JPEG, KTX2, WebP or
+/// AVIF.
+pub fn sniff(bytes: &[u8]) -> Option<&'static str> {
+    uri::sniff(bytes)
+}

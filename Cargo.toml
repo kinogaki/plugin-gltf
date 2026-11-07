@@ -1,15 +1,17 @@
 [package]
 name = "kinogaki-gltf"
-description = "glTF 2.0 and GLB as a format plugin for Kinogaki Studio: the file's own model, its reader and its writer, with the KHR extensions for materials, texture transforms and punctual lights"
+description = "glTF 2.0 and GLB as a format plugin on the Kinogaki Studio SDK: the file's own model, its reader and its writer, and the file to Studio's standard values and back (MaterialX glTF PBR materials with Image nodes, polygons, instances, lights and cameras)"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.98"
 publish = false
 license = "MIT OR Apache-2.0"
 
-# The format builds from its own repository alone: the reader and writer
-# (`src/gltf/`) use nothing but the standard library, JSON and base64
-# included.
+# The format builds from its own repository and the public SDK's alone,
+# checked out side by side as Studio's tree lays them out (README
+# "Building"): its manifest names everything it needs instead of inheriting
+# it from the tree. The reader and writer (`src/gltf/`) use nothing but the
+# standard library, JSON and base64 included.
 [lints.rust]
 unsafe_code = "forbid"
 
@@ -17,5 +19,11 @@ unsafe_code = "forbid"
 dbg_macro = "deny"
 todo = "deny"
 
-[profile.release]
-lto = "thin"
+[dependencies]
+kinogaki-studio-api = { path = "../../sdk/crates/api" }
+# Lights and cameras as standard values, MaterialX's definitions.
+kinogaki-render-api = { path = "../../sdk/crates/render-api" }
+
+[dev-dependencies]
+# The SDK's color service that converts nothing.
+kinogaki-studio-api-testing = { path = "../../sdk/crates/api-testing" }

@@ -1,8 +1,8 @@
 //! Damaged input is an error naming where, never a panic: cut files,
 //! mutated files, structural faults, budgets and cancellation.
-mod common;
+use crate::common;
 
-use common::{primitive, read_bytes, samples};
+use crate::common::{primitive, read_bytes, samples};
 use kinogaki_gltf::gltf::{self, GltfError, ReadOptions};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;

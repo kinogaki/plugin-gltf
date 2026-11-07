@@ -1,12 +1,12 @@
 //! The Khronos samples whose licences keep them out of this repository,
 //! fetched by `tools/fetch_samples.sh`: they read and write back the same.
-mod common;
+use crate::common;
 
 use kinogaki_gltf::gltf::{self, ReadOptions};
 use std::path::Path;
 
 #[test]
-#[ignore = "needs tools/fetch_samples.sh"]
+#[ignore = "hand: needs tools/fetch_samples.sh"]
 fn hand_run_fetched_samples_read_and_write_back_the_same() {
     let fetched = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/khronos-fetched");
     for file in [
