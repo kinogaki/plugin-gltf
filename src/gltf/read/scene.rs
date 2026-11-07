@@ -51,7 +51,7 @@ pub(super) fn scene(scene: &Obj<'_, '_>, nodes: usize) -> Result<Scene> {
 }
 
 /// Nodes form trees: none has two parents or is its own ancestor, and a
-/// scene's nodes are roots.
+/// scene's nodes are roots, each listed once.
 pub(super) fn check_trees(nodes: &[Node], scenes: &[Scene]) -> Result<()> {
     let mut parent = vec![None; nodes.len()];
     for (index, node) in nodes.iter().enumerate() {
@@ -76,12 +76,23 @@ pub(super) fn check_trees(nodes: &[Node], scenes: &[Scene]) -> Result<()> {
             "the node is its own ancestor",
         ));
     }
+    let mut listed = vec![usize::MAX; nodes.len()];
     for (index, scene) in scenes.iter().enumerate() {
+        let at = || format!("scenes[{index}].nodes");
         if let Some(&child) = scene.nodes.iter().find(|&&n| parent[n].is_some()) {
             return Err(GltfError::malformed(
-                format!("scenes[{index}].nodes"),
+                at(),
                 format!("node {child} isn't a root"),
             ));
+        }
+        // Each root once: a scene listing one again would show its tree twice.
+        for &root in &scene.nodes {
+            if std::mem::replace(&mut listed[root], index) == index {
+                return Err(GltfError::malformed(
+                    at(),
+                    format!("node {root} is listed twice"),
+                ));
+            }
         }
     }
     Ok(())

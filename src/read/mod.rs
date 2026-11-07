@@ -12,64 +12,58 @@ pub(crate) mod mesh;
 pub(crate) mod scene;
 
 use crate::at_file;
-use crate::gltf::{self, ImageData, ReadOptions};
+use crate::gltf::{self, ImageData};
 use crate::space::Space;
 use kinogaki_studio_api::edit::editor::{Placed, gather};
-use kinogaki_studio_api::format::options;
+use kinogaki_studio_api::format::files::Named;
 use kinogaki_studio_api::geometry::image::{EmbeddedFile, ImageFile};
 use kinogaki_studio_api::standard::{self, Materials};
 use kinogaki_studio_api::{
-    Diagnostic, Error, FileItem, FormatOptions, Imported, Input, Purpose, Reading, Value,
+    Diagnostic, Error, FileItem, FormatOptions, Imported, Input, Purpose, Reading,
 };
+use std::collections::HashMap;
 use std::path::Path;
-use std::{fs, io};
 
 /// The space glTF's colors are in: material factors, vertex colors and
 /// lights are linear Rec.709 (sRGB) values.
 pub(crate) const LINEAR_SRGB: &str = "Linear Rec.709 (sRGB)";
 
-/// Reads `input` as `chosen` says: Embed Textures reads the images a
-/// `.gltf` names beside it into the project.
+/// Reads `input` as `chosen` says: the files a `.gltf` names are reached
+/// through [`Named`] (in its folder and below, unless Read Files Outside
+/// the Folder), and Embed Textures reads its images into the project.
 pub(crate) fn read(
     input: &Input<'_>,
     chosen: &FormatOptions,
     reading: &Reading<'_>,
 ) -> Result<Imported, Error> {
     reading.check()?;
-    let embed = options::option(chosen, options::EMBED, Value::bool)?;
-    let folder = input.path().and_then(Path::parent);
+    let named = Named::new(input, chosen, reading);
     let mut model = {
         let bytes = input.bytes()?;
-        let mut beside = |name: &str| match folder {
-            Some(folder) => fs::read(folder.join(name)),
-            None => Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                "a file held in memory has no files beside it",
-            )),
+        let mut files = |name: &str| match named.file(name, None) {
+            Some(path) => named.read(&path).map_err(|e| e.message().to_owned()),
+            None => Err(named
+                .warnings()
+                .into_iter()
+                .map(|w| w.message)
+                .collect::<Vec<_>>()
+                .join("; ")),
         };
-        let options = ReadOptions {
-            cancel: Some(reading.cancel.shared_flag()),
-            ..ReadOptions::default()
-        };
-        gltf::read(&bytes, &mut beside, &options).map_err(|e| at_file(input, e))?
+        gltf::read(&bytes, &mut files, &reading.budget).map_err(|e| at_file(input, e))?
     };
     reading.check()?;
     let mut warnings: Vec<Diagnostic> = (model.left_out.iter())
         .map(|left| Diagnostic::warning(left.to_string()))
         .collect();
     let space = Space::of(reading.units);
-    let files = image_files(
-        std::mem::take(&mut model.images),
-        folder,
-        embed,
-        &mut warnings,
-    );
+    let files = image_files(std::mem::take(&mut model.images), &named, &mut warnings);
+    warnings.extend(named.warnings());
     let colored = mesh::colored_materials(&model);
     let materials = material::materials(&model, &files, &colored, reading.colors, &space)?;
     let meshes = (model.meshes.iter())
         .map(|mesh| {
             reading.check()?;
-            let polygons = mesh::geometry(mesh, &space, reading.colors, &mut warnings)?;
+            let polygons = mesh::geometry(mesh, &space, reading, &mut warnings)?;
             Ok(polygons.map(|p| standard::geometry().wrap(p)))
         })
         .collect::<Result<Vec<_>, Error>>()?;
@@ -136,32 +130,32 @@ fn gathered(items: &[FileItem], input: &Input<'_>) -> Result<FileItem, Error> {
 }
 
 /// Each of `images` as the file an Image node reads: packed bytes embedded
-/// under the image's file name (taken, not copied), a path named beside the
-/// file made absolute, and read in when `embed` (one that can't be read
-/// stays a path, said).
+/// under the image's file name, one file a buffer view however many images
+/// share it; a path as [`Named::image`] finds it (read in with Embed
+/// Textures); none for an image out of reach or named by a URI of another
+/// scheme, said.
 fn image_files(
     images: Vec<gltf::Image>,
-    folder: Option<&Path>,
-    embed: bool,
+    named: &Named,
     warnings: &mut Vec<Diagnostic>,
-) -> Vec<ImageFile> {
+) -> Vec<Option<ImageFile>> {
+    let mut packed: HashMap<*const u8, EmbeddedFile> = HashMap::new();
     let mut files = Vec::with_capacity(images.len());
     for (at, image) in images.into_iter().enumerate() {
         let name = file_name(&image, at);
-        files.push(match image.data {
-            ImageData::Embedded(bytes) => ImageFile::Embedded(EmbeddedFile::new(&name, bytes)),
-            ImageData::Path(path) => {
-                let path = folder.map_or_else(|| path.clone().into(), |f| f.join(&path));
-                let read = embed.then(|| fs::read(&path));
-                match read {
-                    Some(Ok(bytes)) => ImageFile::Embedded(EmbeddedFile::new(&name, bytes)),
-                    Some(Err(e)) => {
-                        let why = format!("{}: {e}, kept as a path", path.display());
-                        warnings.push(Diagnostic::warning(why));
-                        ImageFile::Path(path.display().to_string().into())
-                    }
-                    None => ImageFile::Path(path.display().to_string().into()),
-                }
+        files.push(match &image.data {
+            ImageData::Embedded(bytes) => {
+                let file = packed
+                    .entry(bytes.as_ptr())
+                    .or_insert_with(|| EmbeddedFile::new(&name, bytes.to_vec()));
+                Some(ImageFile::Embedded(file.named(&name)))
+            }
+            ImageData::Path(path) => named.image(path, None),
+            ImageData::Elsewhere(uri) => {
+                warnings.push(Diagnostic::warning(format!(
+                    "image {at} ({uri}): no file is read from there, left out"
+                )));
+                None
             }
         });
     }
@@ -173,7 +167,9 @@ fn image_files(
 /// media type says.
 fn file_name(image: &gltf::Image, at: usize) -> String {
     let named = match &image.data {
-        ImageData::Path(path) => path.rsplit('/').next().unwrap_or_default(),
+        ImageData::Path(path) | ImageData::Elsewhere(path) => {
+            path.rsplit('/').next().unwrap_or_default()
+        }
         ImageData::Embedded(_) => image.name.as_str(),
     };
     let named = named.replace(['/', '\\'], "_");

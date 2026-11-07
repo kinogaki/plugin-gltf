@@ -3,6 +3,7 @@
 //!
 //! An extension's values sit in a struct whose `Default` is the extension
 //! absent; a struct at its default is not written, which changes no look.
+use std::sync::Arc;
 
 /// A material: glTF's metallic-roughness model and its extensions. Names
 /// follow MaterialX's `gltf_pbr`.
@@ -341,9 +342,11 @@ impl Image {
 /// Where an image's file is.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ImageData {
-    /// In the file (a buffer view or a `data:` URI), or read from beside it
-    /// when reading embeds images.
-    Embedded(Vec<u8>),
-    /// A path relative to the glTF file, percent-decoded.
+    /// In the file (a buffer view or a `data:` URI); images in one buffer
+    /// view share its bytes.
+    Embedded(Arc<[u8]>),
+    /// A path, percent-decoded: relative to the glTF file, or absolute.
     Path(String),
+    /// A URI of another scheme (`http:`), as written: nothing reads it.
+    Elsewhere(String),
 }

@@ -165,16 +165,14 @@ fn written(read: &Imported, units: Units, name: &str) -> (gltf::Gltf, Vec<String
     let said = writer
         .write(&path, &read.items, &writing, &FormatOptions::new())
         .unwrap_or_else(|e| panic!("{name}: {e}"));
-    let options = gltf::ReadOptions {
-        embed_images: true,
-        ..gltf::ReadOptions::default()
-    };
-    let model = gltf::read_file(&path, &options).unwrap_or_else(|e| panic!("{name}: {e}"));
+    let model = crate::common::read_path(&path);
     std::fs::remove_dir_all(&dir).unwrap();
     (model, said.into_iter().map(|d| d.message).collect())
 }
 
-/// A new, empty folder for `name`.
+/// A new, empty folder for `name`, by its canonical path (the system's
+/// temporary folder may be behind a link, which a relative path a written
+/// `.gltf` names can't climb back through).
 fn scratch(name: &str) -> PathBuf {
     static MADE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let made = MADE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -184,7 +182,7 @@ fn scratch(name: &str) -> PathBuf {
     ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    dir.canonicalize().unwrap()
 }
 
 #[test]
@@ -243,8 +241,10 @@ fn resolved(model: &gltf::Gltf, m: &gltf::Material) -> String {
             i.map(|i| {
                 let image = &model.images[i];
                 let bytes = match &image.data {
-                    gltf::ImageData::Embedded(b) => b.clone(),
-                    gltf::ImageData::Path(p) => p.as_bytes().to_vec(),
+                    gltf::ImageData::Embedded(b) => b.to_vec(),
+                    gltf::ImageData::Path(p) | gltf::ImageData::Elsewhere(p) => {
+                        p.as_bytes().to_vec()
+                    }
                 };
                 (image.mime_type.clone(), bytes.len(), checksum(&bytes))
             })
@@ -624,7 +624,7 @@ fn damaged_files_are_errors_and_a_cancelled_read_stops() {
     let stop = kinogaki_studio_api::CancelToken::default();
     stop.cancel();
     let cancelled = Reading {
-        cancel: stop,
+        budget: kinogaki_studio_api::format::ReadBudget::default().cancelled_by(stop),
         ..Reading::new(Purpose::Objects, Units::default(), &Rec709)
     };
     let read = Format.read(

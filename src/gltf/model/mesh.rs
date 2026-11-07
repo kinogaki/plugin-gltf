@@ -14,8 +14,9 @@ pub struct Primitive {
     pub topology: Topology,
     /// Vertex indices, one per corner: a multiple of 1, 2 or 3 of them. A
     /// file's strips, fans and loops arrive as lists, and a primitive without
-    /// indices as `0..count`.
-    pub indices: Vec<u32>,
+    /// indices as `0..count`. Lists a file shares between primitives stay
+    /// shared (one allocation).
+    pub indices: Arc<[u32]>,
     /// The vertex attributes, every one with the same vertex count:
     /// `POSITION`, `NORMAL`, `TANGENT`, `TEXCOORD_n`, `COLOR_n` and
     /// application ones (`_NAME`), in the file's order.

@@ -87,7 +87,7 @@ fn document(gltf: &Gltf, stem: Option<&str>) -> Result<Document> {
     for (i, image) in gltf.images.iter().enumerate() {
         let mime = image.mime_type.as_deref().or(match &image.data {
             ImageData::Embedded(bytes) => uri::sniff(bytes),
-            ImageData::Path(path) => uri::by_extension(path),
+            ImageData::Path(path) | ImageData::Elsewhere(path) => uri::by_extension(path),
         });
         mimes.push(mime);
         let members = Members::new().with_text("name", &image.name);
@@ -108,7 +108,7 @@ fn document(gltf: &Gltf, stem: Option<&str>) -> Result<Document> {
                     mime.map_or("bin", uri::extension),
                     &mut names,
                 );
-                beside.push((name.clone(), bytes.clone()));
+                beside.push((name.clone(), bytes.to_vec()));
                 members
                     .with("uri", uri::percent_encoded(&name))
                     .with_some("mimeType", mime)
@@ -116,6 +116,9 @@ fn document(gltf: &Gltf, stem: Option<&str>) -> Result<Document> {
             (ImageData::Path(path), _) => members
                 .with("uri", uri::percent_encoded(path))
                 .with_some("mimeType", mime),
+            (ImageData::Elsewhere(text), _) => {
+                members.with_text("uri", text).with_some("mimeType", mime)
+            }
         });
     }
     let mut required = BTreeSet::new();

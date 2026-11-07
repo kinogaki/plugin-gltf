@@ -4,18 +4,20 @@
 //! trees, meshes with decoded vertex attributes, materials with every
 //! ratified `KHR_materials_*` extension MaterialX's glTF PBR carries,
 //! textures, samplers, images as their files' bytes, cameras and
-//! `KHR_lights_punctual` lights. It depends on no SDK; the plugin converts
-//! it to and from Studio's standard values.
+//! `KHR_lights_punctual` lights. It depends on nothing of the SDK but the
+//! read's budget, which a read checks the file's claims against; the plugin
+//! converts it to and from Studio's standard values.
 //!
 //! Reading takes `.gltf` text with the files it names, `data:` URIs, and GLB.
 //! Writing gives a GLB, or `.gltf` text with its `.bin` and image files.
 //! Reading what was written gives the same model back.
 //!
 //! ```
-//! use kinogaki_gltf::gltf::{self, Gltf, ReadOptions};
+//! use kinogaki_gltf::gltf::{self, Gltf};
+//! use kinogaki_studio_api::format::ReadBudget;
 //! let model = Gltf { scenes: vec![gltf::Scene::default()], scene: Some(0), ..Gltf::default() };
 //! let glb = gltf::to_glb(&model).unwrap();
-//! let read = gltf::read(&glb, &mut |_| Err(std::io::ErrorKind::NotFound.into()), &ReadOptions::default()).unwrap();
+//! let read = gltf::read(&glb, &mut |_| Err("no files".into()), &ReadBudget::default()).unwrap();
 //! assert_eq!(read, model);
 //! ```
 mod base64;
@@ -29,7 +31,7 @@ mod write;
 
 pub use error::GltfError;
 pub use model::*;
-pub use read::{EXTENSIONS, ReadOptions, read, read_file};
+pub use read::{EXTENSIONS, Files, read};
 pub use write::{GltfFiles, to_glb, to_gltf, write_file};
 
 /// The media type a file name's extension says (`image/png` of

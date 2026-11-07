@@ -17,11 +17,10 @@ use super::uri::{self, Uri};
 use super::{GltfError, glb};
 use accessor::{Accessor, View};
 use fields::Obj;
+use kinogaki_studio_api::format::ReadBudget;
 use std::borrow::Cow;
-use std::path::Path;
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::{fs, io};
 
 type Result<T> = std::result::Result<T, GltfError>;
 
@@ -47,47 +46,12 @@ pub const EXTENSIONS: [&str; 17] = [
     "EXT_texture_avif",
 ];
 
-/// How to read.
-#[derive(Clone, Debug)]
-pub struct ReadOptions {
-    /// Read images a file names by path into their bytes, as embedded ones.
-    pub embed_images: bool,
-    /// The most bytes decoded attributes and indices may take: a bound on
-    /// what untrusted input allocates.
-    pub max_decoded_bytes: u64,
-    /// Raised, it stops a read between primitives with
-    /// [`GltfError::Cancelled`].
-    pub cancel: Option<Arc<AtomicBool>>,
-}
-
-impl Default for ReadOptions {
-    fn default() -> Self {
-        ReadOptions {
-            embed_images: false,
-            max_decoded_bytes: 16 << 30,
-            cancel: None,
-        }
-    }
-}
-
-/// Reads the file at `path`, finding the files it names beside it.
-pub fn read_file(path: &Path, options: &ReadOptions) -> Result<Gltf> {
-    let bytes = fs::read(path).map_err(|error| GltfError::Io {
-        file: path.display().to_string(),
-        error,
-    })?;
-    let beside = path.parent().unwrap_or(Path::new(""));
-    read(
-        &bytes,
-        &mut |relative| fs::read(beside.join(relative)),
-        options,
-    )
-}
-
-/// Reads a glTF (JSON) or GLB file held in `bytes`. `files` gives the bytes
-/// of a file the glTF names by a relative path (percent-decoded); with no
-/// files beside (an embedded file), it returns an error.
-pub fn read(bytes: &[u8], files: &mut Files<'_>, options: &ReadOptions) -> Result<Gltf> {
+/// Reads a glTF (JSON) or GLB file held in `bytes` within `budget`:
+/// what the file claims (its JSON's depth, its decoded attributes and
+/// indices) is checked against it, and a cancelled budget stops the read
+/// with [`GltfError::Cancelled`]. `files` gives the bytes of a file the
+/// glTF names by a path (percent-decoded), or why it can't.
+pub fn read(bytes: &[u8], files: &mut Files<'_>, budget: &ReadBudget) -> Result<Gltf> {
     let (json, bin) = if glb::is_glb(bytes) {
         glb::split(bytes)?
     } else {
@@ -97,12 +61,14 @@ pub fn read(bytes: &[u8], files: &mut Files<'_>, options: &ReadOptions) -> Resul
     let text = std::str::from_utf8(json).map_err(|e| {
         GltfError::malformed("JSON", format!("not UTF-8 at byte {}", e.valid_up_to()))
     })?;
-    let value = json::parse(text).map_err(|e| GltfError::malformed("JSON", e.to_string()))?;
+    let depth = budget.limits().depth;
+    let value =
+        json::parse(text, depth).map_err(|e| GltfError::malformed("JSON", e.to_string()))?;
     let root = Obj::new(&value, String::new())?;
     let asset = asset(&root)?;
     let mut left_out = extensions(&root)?;
-    let mut reader = Reader::new(&root, bin, files, options)?;
-    let images = root.each("images", |image| reader.image(image, files))?;
+    let mut reader = Reader::new(&root, bin, files, budget)?;
+    let images = root.each("images", |image| reader.image(image))?;
     let samplers = root.each("samplers", material::sampler)?;
     let textures = root.each("textures", |texture| {
         material::texture(texture, samplers.len(), images.len())
@@ -155,29 +121,40 @@ pub fn read(bytes: &[u8], files: &mut Files<'_>, options: &ReadOptions) -> Resul
     })
 }
 
-/// A source of the files a glTF names beside it.
-type Files<'f> = dyn FnMut(&str) -> io::Result<Vec<u8>> + 'f;
+/// A source of the files a glTF names: a path's bytes, or why it has none.
+pub type Files<'f> = dyn FnMut(&str) -> std::result::Result<Vec<u8>, String> + 'f;
 
 /// A read's binary data: buffers, views and accessors, decoded on use
 /// within the budget.
-pub(super) struct Reader<'a, 'o> {
+pub(super) struct Reader<'a> {
     buffers: Vec<Cow<'a, [u8]>>,
     views: Vec<View>,
     accessors: Vec<Accessor>,
     /// Decoded attributes by accessor, shared by the primitives using them.
     decoded: Vec<Option<Arc<[f32]>>>,
-    options: &'o ReadOptions,
-    budget: u64,
+    /// Decoded indices by accessor, and `0..count` lists by count: each
+    /// with its largest index, shared by the primitives using them.
+    indices: HashMap<Indices, (Arc<[u32]>, Option<u32>)>,
+    /// Each buffer view's bytes as the images in it hold them, copied once.
+    pictures: HashMap<usize, Arc<[u8]>>,
+    budget: ReadBudget,
     /// Meshes whose morph targets were applied.
     morphed_meshes: usize,
 }
 
-impl<'a, 'o> Reader<'a, 'o> {
+/// Which index list: an accessor's, or `0..count`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum Indices {
+    Accessor(usize),
+    Sequential(usize),
+}
+
+impl<'a> Reader<'a> {
     fn new(
         root: &Obj<'_, '_>,
         bin: Option<&'a [u8]>,
         files: &mut Files<'_>,
-        options: &'o ReadOptions,
+        budget: &ReadBudget,
     ) -> Result<Self> {
         let mut buffers = Vec::new();
         for (i, buffer) in root.objects("buffers")?.iter().enumerate() {
@@ -203,32 +180,31 @@ impl<'a, 'o> Reader<'a, 'o> {
         })?;
         Ok(Reader {
             decoded: vec![None; accessors.len()],
+            indices: HashMap::new(),
+            pictures: HashMap::new(),
             buffers,
             views,
             accessors,
-            budget: options.max_decoded_bytes,
-            options,
+            budget: budget.clone(),
             morphed_meshes: 0,
         })
     }
 
-    /// Stops when the cancel flag is raised.
+    /// Stops when the read is cancelled.
     fn check(&self) -> Result<()> {
-        match &self.options.cancel {
-            Some(flag) if flag.load(Ordering::Relaxed) => Err(GltfError::Cancelled),
-            _ => Ok(()),
-        }
+        self.budget.check().map_err(GltfError::from)
     }
 
-    /// Spends `bytes` of the decoding budget.
-    fn spend(&mut self, bytes: u64, at: &str) -> Result<()> {
-        self.budget = self.budget.checked_sub(bytes).ok_or_else(|| {
-            GltfError::Limit(format!(
-                "{at}: decoding exceeds the {} bytes allowed",
-                self.options.max_decoded_bytes
-            ))
-        })?;
-        Ok(())
+    /// Charges an allocation of `bytes` the file sized (`None`: past any
+    /// size) to the budget.
+    fn spend(&self, bytes: Option<usize>, at: &str) -> Result<()> {
+        let bytes = bytes.map_or(u64::MAX, |b| b as u64);
+        self.budget
+            .allocate(bytes)
+            .map_err(|e| match e.is_cancelled() {
+                true => GltfError::Cancelled,
+                false => GltfError::Limit(format!("{at}: {}", e.message())),
+            })
     }
 
     /// The bytes of buffer view `view`.
@@ -237,7 +213,7 @@ impl<'a, 'o> Reader<'a, 'o> {
         &self.buffers[view.buffer][view.offset..view.offset + view.length]
     }
 
-    fn image(&self, image: &Obj<'_, '_>, files: &mut Files<'_>) -> Result<Image> {
+    fn image(&mut self, image: &Obj<'_, '_>) -> Result<Image> {
         let declared = image.opt_str("mimeType")?;
         let (data, sniffed) = match (
             image.index("bufferView", self.views.len())?,
@@ -247,36 +223,36 @@ impl<'a, 'o> Reader<'a, 'o> {
                 if declared.is_none() {
                     return Err(image.error("mimeType", "missing for an image in a buffer view"));
                 }
-                (ImageData::Embedded(self.view(view).to_vec()), None)
+                let bytes = match self.pictures.get(&view) {
+                    Some(bytes) => bytes.clone(),
+                    None => {
+                        let bytes: Arc<[u8]> = self.view(view).into();
+                        self.pictures.insert(view, bytes.clone());
+                        bytes
+                    }
+                };
+                (ImageData::Embedded(bytes), None)
             }
             (None, Some(text)) => match uri::sort(text) {
                 Some(Uri::Data { mime, base64 }) => {
                     let bytes =
                         uri::data(base64).ok_or_else(|| image.error("uri", "bad base64"))?;
                     (
-                        ImageData::Embedded(bytes),
+                        ImageData::Embedded(bytes.into()),
                         (!mime.is_empty()).then_some(mime),
                     )
                 }
-                Some(Uri::Path(path)) if self.options.embed_images => (
-                    ImageData::Embedded(load(image, text, files)?),
-                    uri::by_extension(&path),
-                ),
                 Some(Uri::Path(path)) => {
                     let by_extension = uri::by_extension(&path);
                     (ImageData::Path(path), by_extension)
                 }
-                None => {
-                    return Err(
-                        image.error("uri", format!("{text:?} names no file beside the glTF"))
-                    );
-                }
+                Some(Uri::Other) | None => (ImageData::Elsewhere(text.to_owned()), None),
             },
             _ => return Err(image.error("uri", "an image needs one of uri and bufferView")),
         };
         let mime = declared.or(sniffed).or(match &data {
             ImageData::Embedded(bytes) => uri::sniff(bytes),
-            ImageData::Path(_) => None,
+            ImageData::Path(_) | ImageData::Elsewhere(_) => None,
         });
         Ok(Image {
             name: image.text("name")?,
@@ -336,14 +312,14 @@ fn extensions(root: &Obj<'_, '_>) -> Result<Vec<LeftOut>> {
     Ok(used.map(LeftOut::Extension).collect())
 }
 
-/// The bytes a `uri` names.
+/// The bytes a buffer's `uri` names.
 fn load(at: &Obj<'_, '_>, text: &str, files: &mut Files<'_>) -> Result<Vec<u8>> {
     match uri::sort(text) {
         Some(Uri::Data { base64, .. }) => {
             uri::data(base64).ok_or_else(|| at.error("uri", "bad base64"))
         }
-        Some(Uri::Path(path)) => files(&path).map_err(|error| GltfError::Io { file: path, error }),
-        None => Err(at.error("uri", format!("{text:?} names no file beside the glTF"))),
+        Some(Uri::Path(path)) => files(&path).map_err(|why| at.error("uri", why)),
+        Some(Uri::Other) | None => Err(at.error("uri", format!("{text:?} names no file"))),
     }
 }
 

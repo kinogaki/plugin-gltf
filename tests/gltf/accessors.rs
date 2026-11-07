@@ -56,7 +56,7 @@ fn components_normalize_as_gltf_defines() {
         [0.0, 1.0, 32768.0 / 65535.0, 0.0, 1.0, 1.0]
     );
     assert_eq!(values(&model, "_COUNT"), [7.0, 200.0, 0.0]);
-    assert_eq!(model.meshes[0].primitives[0].indices, [2, 1, 0]);
+    assert_eq!(*model.meshes[0].primitives[0].indices, [2, 1, 0]);
 }
 
 #[test]
@@ -92,7 +92,7 @@ fn strided_views_and_padded_matrix_columns_read_element_by_element() {
             .kind,
         Kind::Mat2
     );
-    assert_eq!(model.meshes[0].primitives[0].indices, [0, 1]);
+    assert_eq!(*model.meshes[0].primitives[0].indices, [0, 1]);
 }
 
 #[test]

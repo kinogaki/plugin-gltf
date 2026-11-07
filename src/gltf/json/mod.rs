@@ -177,6 +177,10 @@ impl<T: Into<Value<'static>>> From<Vec<T>> for Value<'static> {
 mod tests {
     use super::*;
 
+    fn parse(text: &str) -> Result<Value<'_>, parse::JsonError> {
+        super::parse(text, 256)
+    }
+
     #[test]
     fn text_reads_and_writes_back() {
         let text =
@@ -221,6 +225,12 @@ mod tests {
         }
         let deep = "[".repeat(10_000);
         assert!(parse(&deep).is_err());
+        let shallow = format!("{}{}", "[".repeat(256), "]".repeat(256));
+        assert!(parse(&shallow).is_ok());
+        assert!(
+            super::parse(&shallow, 255).is_err(),
+            "the depth is the caller's"
+        );
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! Buffer views and accessors: typed elements out of a buffer's bytes,
 //! strided or packed, sparse or dense, normalized or not.
 use super::fields::Obj;
-use super::{Reader, Result};
+use super::{Indices, Reader, Result};
 use crate::gltf::GltfError;
 use crate::gltf::model::Kind;
 use std::borrow::Cow;
@@ -160,7 +160,7 @@ impl Accessor {
     }
 }
 
-impl Reader<'_, '_> {
+impl Reader<'_> {
     /// Accessor `index`'s numbers as `f32`, shared with every earlier and
     /// later use of the same accessor.
     pub(super) fn floats(&mut self, index: usize) -> Result<Arc<[f32]>> {
@@ -204,8 +204,27 @@ impl Reader<'_, '_> {
         }
     }
 
+    /// The index list `which` names, decoded once and shared, with its
+    /// largest index.
+    pub(super) fn index_list(&mut self, which: Indices) -> Result<(Arc<[u32]>, Option<u32>)> {
+        if let Some(list) = self.indices.get(&which) {
+            return Ok(list.clone());
+        }
+        let list: Vec<u32> = match which {
+            Indices::Accessor(index) => self.integers(index)?,
+            Indices::Sequential(count) => {
+                self.spend(count.checked_mul(4), "indices")?;
+                (0..count as u32).collect()
+            }
+        };
+        let max = list.iter().copied().max();
+        let list = (Arc::from(list), max);
+        self.indices.insert(which, list.clone());
+        Ok(list)
+    }
+
     /// Accessor `index`'s unsigned integers (vertex indices).
-    pub(super) fn integers(&mut self, index: usize) -> Result<Vec<u32>> {
+    fn integers(&mut self, index: usize) -> Result<Vec<u32>> {
         let accessor = &self.accessors[index];
         if accessor.kind != Kind::Scalar || accessor.normalized {
             return Err(GltfError::malformed(
@@ -236,7 +255,7 @@ impl Reader<'_, '_> {
         let numbers = accessor.count.checked_mul(accessor.kind.width());
         let bytes = numbers.and_then(|n| n.checked_mul(size_of::<T>()));
         let at = accessor.at.clone();
-        self.spend(bytes.map_or(u64::MAX, |b| b as u64), &at)?;
+        self.spend(bytes, &at)?;
         let accessor = &self.accessors[index];
         let layout = Layout::of(accessor);
         let mut values = match accessor.view {

@@ -11,12 +11,22 @@ pub enum GltfError {
     Malformed { at: String, message: String },
     /// The file requires an extension this reader doesn't read.
     Unsupported(String),
-    /// Decoding would exceed [`ReadOptions::max_decoded_bytes`](crate::gltf::ReadOptions).
+    /// The file asks more than the read's budget allows.
     Limit(String),
     /// The model can't be written: where and why.
     Invalid { at: String, message: String },
-    /// The options' cancel flag was raised.
+    /// The read was cancelled.
     Cancelled,
+}
+
+/// The read's budget refusing: cancelled, or over a limit.
+impl From<kinogaki_studio_api::Error> for GltfError {
+    fn from(error: kinogaki_studio_api::Error) -> GltfError {
+        match error.is_cancelled() {
+            true => GltfError::Cancelled,
+            false => GltfError::Limit(error.message().to_owned()),
+        }
+    }
 }
 
 impl GltfError {

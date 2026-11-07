@@ -13,9 +13,9 @@
 //! Each line gives the model's share too: the bytes to [`Gltf`] and back.
 use kinogaki_gltf::Format;
 use kinogaki_gltf::gltf::{
-    self, Attribute, Gltf, Image, ImageData, Kind, Mesh, Node, Primitive, ReadOptions, Scene,
-    Topology,
+    self, Attribute, Gltf, Image, ImageData, Kind, Mesh, Node, Primitive, Scene, Topology,
 };
+use kinogaki_studio_api::format::ReadBudget;
 use kinogaki_studio_api::geometry::Units;
 use kinogaki_studio_api::{FileFormat, FileItem, FormatOptions, Input, Purpose, Reading, Writing};
 use kinogaki_studio_api_testing::Unconverted;
@@ -113,8 +113,8 @@ fn write(items: &[FileItem], path: &Path) {
 fn read(bytes: &[u8]) -> Gltf {
     gltf::read(
         bytes,
-        &mut |_| Err(std::io::ErrorKind::NotFound.into()),
-        &ReadOptions::default(),
+        &mut |_| Err("no files".into()),
+        &ReadBudget::default(),
     )
     .unwrap()
 }
@@ -175,7 +175,7 @@ fn grid(side: u32) -> Gltf {
     };
     let primitive = Primitive {
         topology: Topology::Triangles,
-        indices,
+        indices: indices.into(),
         attributes: vec![
             attribute("POSITION", Kind::Vec3, positions),
             attribute("NORMAL", Kind::Vec3, normals),
@@ -218,7 +218,7 @@ fn pictures(count: usize, size: usize) -> Vec<u8> {
             Image {
                 name: format!("picture {i}"),
                 mime_type: Some("image/png".into()),
-                data: ImageData::Embedded(bytes),
+                data: ImageData::Embedded(bytes.into()),
             }
         })
         .collect();

@@ -2,7 +2,6 @@
 //! fetched by `tools/fetch_samples.sh`: they read and write back the same.
 use crate::common;
 
-use kinogaki_gltf::gltf::{self, ReadOptions};
 use std::path::Path;
 
 #[test]
@@ -14,12 +13,7 @@ fn hand_run_fetched_samples_read_and_write_back_the_same() {
         "DamagedHelmet/glTF/DamagedHelmet.gltf",
         "Sponza/glTF/Sponza.gltf",
     ] {
-        let options = ReadOptions {
-            embed_images: true,
-            ..ReadOptions::default()
-        };
-        let model = gltf::read_file(&fetched.join(file), &options)
-            .unwrap_or_else(|e| panic!("{file}: {e}"));
+        let model = common::read_path(&fetched.join(file));
         assert!(
             model.left_out.is_empty() && !model.images.is_empty(),
             "{file}"

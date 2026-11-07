@@ -332,7 +332,7 @@ fn primitive(
     }
     Ok(Primitive {
         topology,
-        indices,
+        indices: indices.into(),
         attributes,
         material,
     })

@@ -46,11 +46,6 @@ impl<'v, 'a> Obj<'v, 'a> {
         self.get(key).is_some()
     }
 
-    /// The members in order.
-    pub fn members(&self) -> impl Iterator<Item = (&'v str, &'v Value<'a>)> {
-        self.members.iter().map(|(k, v)| (k.as_ref(), v))
-    }
-
     fn typed<T>(
         &self,
         key: &str,
@@ -150,6 +145,20 @@ impl<'v, 'a> Obj<'v, 'a> {
     pub fn required_index(&self, key: &str, len: usize) -> Result<usize> {
         self.index(key, len)?
             .ok_or_else(|| self.error(key, "missing"))
+    }
+
+    /// Each member as an index into a list of `len`, by its name: one pass,
+    /// for an object of many members (a primitive's attributes).
+    pub fn indexed(&self, len: usize) -> impl Iterator<Item = (&'v str, Result<usize>)> {
+        self.members.iter().map(move |(key, value)| {
+            let index = match value {
+                Value::Number(n) => whole(*n).filter(|&i| i < len),
+                _ => None,
+            };
+            let index =
+                index.ok_or_else(|| self.error(key, format!("expected an index below {len}")));
+            (key.as_ref(), index)
+        })
     }
 
     /// An array of indices into a list of `len`.

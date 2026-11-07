@@ -26,7 +26,7 @@ use std::sync::Arc;
 /// which a primitive with vertex colors reads.
 pub(super) fn materials(
     model: &Gltf,
-    files: &[ImageFile],
+    files: &[Option<ImageFile>],
     colored: &[bool],
     colors: &dyn ColorService,
     space: &Space,
@@ -63,7 +63,7 @@ pub(super) fn materials(
 /// A material's network as it is made.
 struct Seed<'a> {
     model: &'a Gltf,
-    files: &'a [ImageFile],
+    files: &'a [Option<ImageFile>],
     colors: &'a dyn ColorService,
     space: &'a Space,
     seed: NetworkSeed,
@@ -124,21 +124,22 @@ impl Seed<'_> {
         Ok(())
     }
 
-    /// The Image node reading image `image` as data or as color.
-    fn image(&mut self, image: usize, data: bool) -> usize {
+    /// The Image node reading image `image` as data or as color; none for
+    /// an image left out.
+    fn image(&mut self, image: usize, data: bool) -> Option<usize> {
         if let Some(&(_, at)) = self.images.iter().find(|(k, _)| *k == (image, data)) {
-            return at;
+            return Some(at);
         }
         let color = match data {
             true => ImageColor::Data,
             false => ImageColor::Auto,
         };
-        let source = ImageSource::new(self.files[image].clone(), color);
+        let source = ImageSource::new(self.files[image].clone()?, color);
         let stem = std::path::Path::new(source.name()).file_stem();
         let name = stem.map_or_else(|| "Image".into(), |s| s.to_string_lossy().into_owned());
         let at = self.seed.node(image_node::reading(&source).named(name));
         self.images.push(((image, data), at));
-        at
+        Some(at)
     }
 
     /// The `texcoord` node reading set `set`.
@@ -160,8 +161,9 @@ impl Seed<'_> {
         // The image a decoder reads: `source` (PNG or JPEG), else the
         // extension's (KHR_texture_basisu, EXT_texture_webp or avif).
         let image = texture.source.or(texture.extension_source).expect("read");
-        let file = self.image(image, data);
-        self.seed.wire(file, image_node::IMAGE, at, "file");
+        if let Some(file) = self.image(image, data) {
+            self.seed.wire(file, image_node::IMAGE, at, "file");
+        }
         let sampler = texture.sampler.map(|s| self.model.samplers[s].clone());
         let sampler = sampler.unwrap_or_default();
         for (name, wrap) in [

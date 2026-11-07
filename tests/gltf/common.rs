@@ -1,5 +1,6 @@
 //! The Khronos sample assets committed under `tests/fixtures/khronos`.
-use kinogaki_gltf::gltf::{self, Gltf, ImageData, ReadOptions};
+use kinogaki_gltf::gltf::{self, Gltf, GltfError, ImageData};
+use kinogaki_studio_api::format::ReadBudget;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -44,23 +45,31 @@ pub fn read(model: &str, variant: &str) -> Gltf {
 
 /// The file at `path` read with images embedded.
 pub fn read_path(path: &Path) -> Gltf {
-    gltf::read_file(
-        path,
-        &ReadOptions {
-            embed_images: true,
-            ..ReadOptions::default()
-        },
-    )
-    .unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+    read_file(path, true).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
+
+/// The model of the file at `path`, a trusted fixture: the files it names
+/// read from beside it, and its images read in when `embed`.
+pub fn read_file(path: &Path, embed: bool) -> Result<Gltf, GltfError> {
+    let bytes = std::fs::read(path).unwrap();
+    let folder = path.parent().unwrap();
+    let mut files =
+        |name: &str| std::fs::read(folder.join(name)).map_err(|e| format!("{name}: {e}"));
+    let mut model = gltf::read(&bytes, &mut files, &ReadBudget::default())?;
+    for image in model.images.iter_mut().filter(|_| embed) {
+        if let ImageData::Path(name) = &image.data
+            && let Ok(bytes) = std::fs::read(folder.join(name))
+        {
+            image.data = ImageData::Embedded(bytes.into());
+        }
+    }
+    Ok(model)
 }
 
 /// Bytes held in memory, with no files beside them.
 pub fn read_bytes(bytes: &[u8]) -> Result<Gltf, gltf::GltfError> {
-    gltf::read(
-        bytes,
-        &mut |_| Err(std::io::ErrorKind::NotFound.into()),
-        &ReadOptions::default(),
-    )
+    let mut files = |name: &str| Err(format!("{name}: held in memory"));
+    gltf::read(bytes, &mut files, &ReadBudget::default())
 }
 
 /// `bytes` in base64, for `data:` URIs.
@@ -101,19 +110,14 @@ pub fn written_and_read(model: &Gltf) -> [Gltf; 2] {
     let glb = read_bytes(&gltf::to_glb(model).unwrap()).unwrap();
     let files = gltf::to_gltf(model, "scene").unwrap();
     let beside: HashMap<String, Vec<u8>> = files.bin.iter().chain(&files.images).cloned().collect();
-    let mut open = |name: &str| {
-        beside
-            .get(name)
-            .cloned()
-            .ok_or(std::io::ErrorKind::NotFound.into())
-    };
-    let mut text = gltf::read(files.json.as_bytes(), &mut open, &ReadOptions::default()).unwrap();
+    let mut open = |name: &str| beside.get(name).cloned().ok_or(format!("{name}: no file"));
+    let mut text = gltf::read(files.json.as_bytes(), &mut open, &ReadBudget::default()).unwrap();
     // The images written beside the .gltf were embedded in the model.
     for image in &mut text.images {
         if let ImageData::Path(path) = &image.data
             && let Some(bytes) = beside.get(path)
         {
-            image.data = ImageData::Embedded(bytes.clone());
+            image.data = ImageData::Embedded(bytes.as_slice().into());
         }
     }
     [glb, text]

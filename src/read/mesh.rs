@@ -14,13 +14,13 @@
 use super::LINEAR_SRGB;
 use crate::gltf::{self, Gltf, Primitive, Topology};
 use crate::space::Space;
-use kinogaki_studio_api::color::ColorService;
+use kinogaki_studio_api::format::ReadBudget;
 use kinogaki_studio_api::geometry::{
     Attribute, AttributeType, Attributes, Column, Domain, Elements, Geometry, Kind, Meaning,
     Primitives, Storage, Text, Values, names,
 };
-use kinogaki_studio_api::{Diagnostic, Error};
-use std::collections::BTreeSet;
+use kinogaki_studio_api::{Diagnostic, Error, Reading};
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 /// The point attribute holding `TANGENT`'s direction.
@@ -59,13 +59,16 @@ pub(crate) fn key(material: usize) -> String {
 }
 
 /// `mesh` as one Geometry in `space`; none when it has no primitive with
-/// positions (said).
+/// positions (said). Its points and corners are charged to `reading`'s
+/// budget before they are made: primitives sharing an accessor each hold
+/// its vertices as points of their own.
 pub(super) fn geometry(
     mesh: &gltf::Mesh,
     space: &Space,
-    colors: &dyn ColorService,
+    reading: &Reading<'_>,
     warnings: &mut Vec<Diagnostic>,
 ) -> Result<Option<Geometry>, Error> {
+    let (colors, budget) = (reading.colors, &reading.budget);
     let prims: Vec<&Primitive> = (mesh.primitives.iter())
         .filter(|p| p.attribute("POSITION").is_some())
         .collect();
@@ -91,12 +94,13 @@ pub(super) fn geometry(
             named(mesh)
         )));
     }
-    let mut positions = Vec::with_capacity(points);
+    let mut positions = budget.vec(points)?;
     for p in &prims {
+        reading.check()?;
         let at = &p.attribute("POSITION").expect("kept").values;
         positions.extend(at.as_chunks::<3>().0.iter().map(|v| space.point(widen(v))));
     }
-    let table = Table::of(&prims, &bases);
+    let table = Table::of(&prims, &bases, budget)?;
     if table.dropped > 0 {
         warnings.push(Diagnostic::warning(format!(
             "{}: {} triangles and lines naming a vertex twice left out",
@@ -105,8 +109,12 @@ pub(super) fn geometry(
         )));
     }
     let mut attributes = Attributes::new();
-    let has = |name: &str| prims.iter().any(|p| p.attribute(name).is_some());
-    let normals = has("NORMAL").then(|| normals(&prims, &bases, &table, &positions, space));
+    let named_in = Lookup::of(&prims);
+    let has = |name: &str| (0..prims.len()).any(|p| named_in.get(p, name).is_some());
+    let normals = match has("NORMAL") {
+        true => Some(normals(&prims, &bases, &table, &positions, space, budget)?),
+        false => None,
+    };
     if let Some(n) = &normals {
         let column = Attribute::tuples(n.clone(), Meaning::Normal)?;
         attributes = attributes.with(Domain::Point, names::N, column)?;
@@ -116,16 +124,21 @@ pub(super) fn geometry(
         .filter_map(|a| a.name.strip_prefix("TEXCOORD_")?.parse().ok())
         .collect();
     for set in sets {
-        let uv: Vec<[f32; 2]> = per_point(&prims, &format!("TEXCOORD_{set}"), [0.0; 2], |v| {
-            [v[0], 1.0 - v[1]]
-        });
+        let uv: Vec<[f32; 2]> = per_point(
+            &prims,
+            &named_in,
+            &format!("TEXCOORD_{set}"),
+            [0.0; 2],
+            budget,
+            |v| [v[0], 1.0 - v[1]],
+        )?;
         let column = Attribute::tuples(uv, Meaning::TextureCoord)?;
         attributes = attributes.with(Domain::Point, &uv_name(set), column)?;
     }
     if has("COLOR_0") {
-        let rgba: Vec<[f32; 4]> = per_point(&prims, "COLOR_0", [1.0; 4], |v| {
+        let rgba: Vec<[f32; 4]> = per_point(&prims, &named_in, "COLOR_0", [1.0; 4], budget, |v| {
             [v[0], v[1], v[2], v.get(3).copied().unwrap_or(1.0)]
-        });
+        })?;
         let mut rgb: Vec<[f64; 3]> = rgba.iter().map(|c| widen(&c[..3])).collect();
         colors.to_working(LINEAR_SRGB, &mut rgb)?;
         let cd: Vec<[f32; 3]> = rgb.iter().map(|c| c.map(|v| v as f32)).collect();
@@ -147,7 +160,9 @@ pub(super) fn geometry(
         }
     }
     if has("TANGENT") {
-        let t: Vec<[f32; 4]> = per_point(&prims, "TANGENT", [0.0; 4], |v| [v[0], v[1], v[2], v[3]]);
+        let t: Vec<[f32; 4]> = per_point(&prims, &named_in, "TANGENT", [0.0; 4], budget, |v| {
+            [v[0], v[1], v[2], v[3]]
+        })?;
         let u: Vec<[f32; 3]> = t
             .iter()
             .map(|t| narrow(space.turn(widen(&t[..3]))))
@@ -176,8 +191,9 @@ pub(super) fn geometry(
         .filter(|name| name.starts_with('_'))
         .collect();
     for name in own {
-        let width = (prims.iter())
-            .find_map(|p| p.attribute(name))
+        budget.check()?;
+        let width = (0..prims.len())
+            .find_map(|p| named_in.get(p, name))
             .map_or(1, |a| a.kind.width());
         if width > 4 || names::check_name(name).is_err() || names::standard_type(name).is_some() {
             warnings.push(Diagnostic::warning(format!(
@@ -186,9 +202,9 @@ pub(super) fn geometry(
             )));
             continue;
         }
-        let mut values = Vec::with_capacity(points * width);
-        for p in &prims {
-            match p.attribute(name).filter(|a| a.kind.width() == width) {
+        let mut values = budget.vec(points.saturating_mul(width))?;
+        for (at, p) in prims.iter().enumerate() {
+            match named_in.get(at, name).filter(|a| a.kind.width() == width) {
                 Some(a) => values.extend_from_slice(&a.values),
                 None => values.resize(values.len() + p.vertex_count() * width, 0.0),
             }
@@ -227,24 +243,29 @@ struct Table {
     kinds: Vec<Kind>,
     /// Each element's primitive.
     from: Vec<u32>,
+    /// Where each primitive's elements start, and where the last ends.
+    starts: Vec<usize>,
     /// Triangles and lines naming a vertex twice.
     dropped: usize,
 }
 
 impl Table {
-    fn of(prims: &[&Primitive], bases: &[usize]) -> Table {
+    fn of(prims: &[&Primitive], bases: &[usize], budget: &ReadBudget) -> Result<Table, Error> {
         let elements: usize = (prims.iter())
             .map(|p| p.indices.len() / p.topology.corners())
             .sum();
         let mut table = Table {
-            offsets: Vec::with_capacity(elements + 1),
-            corners: Vec::with_capacity(elements * 3),
-            kinds: Vec::with_capacity(elements),
-            from: Vec::with_capacity(elements),
+            offsets: budget.vec(elements.saturating_add(1))?,
+            corners: budget.vec(elements.saturating_mul(3))?,
+            kinds: budget.vec(elements)?,
+            from: budget.vec(elements)?,
+            starts: Vec::with_capacity(prims.len() + 1),
             dropped: 0,
         };
         table.offsets.push(0);
         for (at, (p, &base)) in prims.iter().zip(bases).enumerate() {
+            table.starts.push(table.kinds.len());
+            budget.check()?;
             let base = base as u32;
             let kind = match p.topology {
                 Topology::Points => continue,
@@ -263,22 +284,20 @@ impl Table {
                 table.from.push(at as u32);
             }
         }
-        table
+        table.starts.push(table.kinds.len());
+        Ok(table)
     }
 
     /// Each element's material key; empty for a primitive with none.
     fn materials(&self, prims: &[&Primitive]) -> Result<Attribute, Error> {
         let mut keys: Vec<Arc<str>> = Vec::new();
+        let mut slot: HashMap<Option<usize>, u32> = HashMap::new();
         let slots: Vec<u32> = (prims.iter())
             .map(|p| {
-                let key: Arc<str> = p.material.map_or_else(|| Arc::from(""), |m| key(m).into());
-                match keys.iter().position(|k| *k == key) {
-                    Some(at) => at as u32,
-                    None => {
-                        keys.push(key);
-                        (keys.len() - 1) as u32
-                    }
-                }
+                *slot.entry(p.material).or_insert_with(|| {
+                    keys.push(p.material.map_or_else(|| Arc::from(""), |m| key(m).into()));
+                    (keys.len() - 1) as u32
+                })
             })
             .collect();
         let indices = self.from.iter().map(|&p| slots[p as usize]).collect();
@@ -298,16 +317,18 @@ fn normals(
     table: &Table,
     positions: &[[f64; 3]],
     space: &Space,
-) -> Vec<[f32; 3]> {
-    let mut n = Vec::with_capacity(positions.len());
+    budget: &ReadBudget,
+) -> Result<Vec<[f32; 3]>, Error> {
+    let mut n = budget.vec(positions.len())?;
     for (at, (p, &base)) in prims.iter().zip(bases).enumerate() {
+        budget.check()?;
         if let Some(own) = p.attribute("NORMAL") {
             let turned = own.values.as_chunks::<3>().0.iter();
             n.extend(turned.map(|v| narrow(space.turn(widen(v)))));
             continue;
         }
         let mut sum = vec![[0.0f64; 3]; p.vertex_count()];
-        let elements = (0..table.kinds.len()).filter(|&e| table.from[e] == at as u32);
+        let elements = table.starts[at]..table.starts[at + 1];
         for e in elements.filter(|&e| table.kinds[e] == Kind::POLYGON) {
             let corners = &table.corners[table.offsets[e] as usize..table.offsets[e + 1] as usize];
             let [a, b, c] = [0, 1, 2].map(|i| positions[corners[i] as usize]);
@@ -325,25 +346,52 @@ fn normals(
             }
         }));
     }
-    n
+    Ok(n)
 }
 
 /// One value a point of attribute `name` across `prims`: each value of a
 /// primitive having it through `read`, `missing` for one lacking it.
 fn per_point<T: Copy>(
     prims: &[&Primitive],
+    named_in: &Lookup<'_>,
     name: &str,
     missing: T,
+    budget: &ReadBudget,
     read: impl Fn(&[f32]) -> T,
-) -> Vec<T> {
-    let mut out = Vec::with_capacity(prims.iter().map(|p| p.vertex_count()).sum());
-    for p in prims {
-        match p.attribute(name) {
+) -> Result<Vec<T>, Error> {
+    let mut out = budget.vec(prims.iter().map(|p| p.vertex_count()).sum())?;
+    for (at, p) in prims.iter().enumerate() {
+        match named_in.get(at, name) {
             Some(a) => out.extend(a.values.chunks_exact(a.kind.width()).map(&read)),
             None => out.extend(std::iter::repeat_n(missing, p.vertex_count())),
         }
     }
-    out
+    Ok(out)
+}
+
+/// Each primitive's attributes by name (the first of a name), so a mesh of
+/// many attributes finds each at once.
+struct Lookup<'a>(Vec<HashMap<&'a str, &'a gltf::Attribute>>);
+
+impl<'a> Lookup<'a> {
+    fn of(prims: &[&'a Primitive]) -> Lookup<'a> {
+        Lookup(
+            (prims.iter())
+                .map(|p| {
+                    let mut named = HashMap::with_capacity(p.attributes.len());
+                    for a in &p.attributes {
+                        named.entry(a.name.as_str()).or_insert(a);
+                    }
+                    named
+                })
+                .collect(),
+        )
+    }
+
+    /// Primitive `at`'s attribute `name`.
+    fn get(&self, at: usize, name: &str) -> Option<&'a gltf::Attribute> {
+        self.0[at].get(name).copied()
+    }
 }
 
 /// What a message calls `mesh`.

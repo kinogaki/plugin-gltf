@@ -400,41 +400,46 @@ impl Out<'_> {
     }
 
     /// The glTF image of `source`, made once, and whether it is an
-    /// extension's (KTX2, WebP, AVIF); none for an image glTF doesn't hold
-    /// or that can't be read, said.
+    /// extension's (KTX2, WebP, AVIF): in a GLB its bytes, in a `.gltf` its
+    /// name beside it. None for an image glTF doesn't hold or that can't be
+    /// read, said.
     fn image(&mut self, source: &ImageSource) -> Option<(usize, bool)> {
         let file = source.file();
         if let Some((_, made)) = self.looks.images.iter().find(|(f, _)| f == file) {
             return made.map(|i| (i, extended(&self.model.images[i])));
         }
-        let read = match file {
-            ImageFile::Embedded(file) => Ok(file.bytes().to_vec()),
-            ImageFile::Path(path) => std::fs::read(&**path).map_err(|e| format!("{path}: {e}")),
-        };
         let name = source.name().to_owned();
+        let read = match (&mut self.beside, file) {
+            (Some(beside), _) => kind(file, &name).and_then(|mime| {
+                let named = beside.name(file).map_err(|e| e.to_string())?;
+                Ok((gltf::ImageData::Path(named), mime))
+            }),
+            (None, ImageFile::Embedded(held)) => {
+                kind(file, &name).map(|mime| (gltf::ImageData::Embedded(held.bytes().into()), mime))
+            }
+            (None, ImageFile::Path(path)) => regular(path)
+                .and_then(|()| std::fs::read(&**path).map_err(|e| format!("{path}: {e}")))
+                .and_then(|bytes| {
+                    let mime = gltf::sniff(&bytes).or_else(|| gltf::media_type(&name));
+                    let mime = mime.ok_or_else(|| unheld(&name))?;
+                    Ok((gltf::ImageData::Embedded(bytes.into()), mime))
+                }),
+        };
         let made = match read {
             Err(why) => {
                 self.warn(format!("{why}; the texture is left out"));
                 None
             }
-            Ok(bytes) => match gltf::sniff(&bytes).or_else(|| gltf::media_type(&name)) {
-                Some(mime) => {
-                    let stem = std::path::Path::new(&name).file_stem();
-                    let stem = stem.map_or_else(String::new, |s| s.to_string_lossy().into_owned());
-                    self.model.images.push(gltf::Image {
-                        name: stem,
-                        mime_type: Some(mime.to_owned()),
-                        data: gltf::ImageData::Embedded(bytes),
-                    });
-                    Some(self.model.images.len() - 1)
-                }
-                None => {
-                    self.warn(format!(
-                        "{name}: glTF holds PNG, JPEG, KTX2, WebP and AVIF images; the texture is left out"
-                    ));
-                    None
-                }
-            },
+            Ok((data, mime)) => {
+                let stem = std::path::Path::new(&name).file_stem();
+                let stem = stem.map_or_else(String::new, |s| s.to_string_lossy().into_owned());
+                self.model.images.push(gltf::Image {
+                    name: stem,
+                    mime_type: Some(mime.to_owned()),
+                    data,
+                });
+                Some(self.model.images.len() - 1)
+            }
         };
         self.looks.images.push((file.clone(), made));
         made.map(|i| (i, extended(&self.model.images[i])))
@@ -450,6 +455,39 @@ impl Out<'_> {
         self.looks.samplers.push((sampler, s));
         s
     }
+}
+
+/// The media type of `file`, named `name`: what its first bytes say,
+/// else its extension; an error saying glTF doesn't hold it.
+fn kind(file: &ImageFile, name: &str) -> Result<&'static str, String> {
+    let head = match file {
+        ImageFile::Embedded(held) => Some(held.bytes()[..held.bytes().len().min(16)].to_vec()),
+        ImageFile::Path(path) => regular(path).ok().and_then(|()| {
+            use std::io::Read as _;
+            let mut head = Vec::with_capacity(16);
+            let file = std::fs::File::open(&**path).ok()?;
+            file.take(16).read_to_end(&mut head).ok()?;
+            Some(head)
+        }),
+    };
+    (head.as_deref().and_then(gltf::sniff))
+        .or_else(|| gltf::media_type(name))
+        .ok_or_else(|| unheld(name))
+}
+
+/// `Ok` for a regular file at `path`; never a device or a pipe, which a
+/// read would never finish.
+fn regular(path: &str) -> Result<(), String> {
+    match std::fs::metadata(path) {
+        Ok(meta) if meta.is_file() => Ok(()),
+        Ok(_) => Err(format!("{path}: not a regular file")),
+        Err(e) => Err(format!("{path}: {e}")),
+    }
+}
+
+/// Why glTF can't hold the picture `name`.
+fn unheld(name: &str) -> String {
+    format!("{name}: glTF holds PNG, JPEG, KTX2, WebP and AVIF images")
 }
 
 /// Whether `image` is an extension's: KTX2, WebP or AVIF.

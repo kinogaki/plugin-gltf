@@ -1,16 +1,15 @@
 //! The Khronos sample assets read as their READMEs describe them.
 
-use crate::common::{read, read_bytes, sample, samples};
+use crate::common::{read, read_bytes, read_file, sample, samples};
 use kinogaki_gltf::gltf::{
     self, AlphaMode, ImageData, Kind, LeftOut, LightKind, MagFilter, MinFilter, Projection,
-    ReadOptions, TextureTransform, Topology, Wrap,
+    TextureTransform, Topology, Wrap,
 };
 
 #[test]
 fn every_sample_reads_saying_what_it_leaves_out() {
     for path in samples() {
-        let model = gltf::read_file(&path, &ReadOptions::default())
-            .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let model = read_file(&path, false).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
         let name = path.file_stem().unwrap().to_string_lossy();
         let expected = match name.as_ref() {
             "SheenChair" => vec![LeftOut::Extension("KHR_materials_variants".into())],
@@ -64,14 +63,14 @@ fn a_glb_or_a_gltf_of_data_uris_reads_from_memory_alone() {
     let bytes = std::fs::read(sample("BoxTextured", "glTF")).unwrap();
     let error = read_bytes(&bytes).unwrap_err();
     assert!(
-        matches!(&error, gltf::GltfError::Io { file, .. } if file == "BoxTextured0.bin"),
+        matches!(&error, gltf::GltfError::Malformed { at, message } if at == "buffers[0].uri" && message.starts_with("BoxTextured0.bin")),
         "{error}"
     );
 }
 
 #[test]
 fn images_are_kept_as_their_files_bytes_or_paths() {
-    let beside = gltf::read_file(&sample("BoxTextured", "glTF"), &ReadOptions::default()).unwrap();
+    let beside = read_file(&sample("BoxTextured", "glTF"), false).unwrap();
     assert_eq!(
         beside.images[0].data,
         ImageData::Path("CesiumLogoFlat.png".into())
@@ -81,7 +80,11 @@ fn images_are_kept_as_their_files_bytes_or_paths() {
         std::fs::read(sample("BoxTextured", "glTF").with_file_name("CesiumLogoFlat.png")).unwrap();
     for variant in ["glTF", "glTF-Binary", "glTF-Embedded"] {
         let image = &read("BoxTextured", variant).images[0];
-        assert_eq!(image.data, ImageData::Embedded(png.clone()), "{variant}");
+        assert_eq!(
+            image.data,
+            ImageData::Embedded(png.as_slice().into()),
+            "{variant}"
+        );
         assert_eq!(image.mime_type.as_deref(), Some("image/png"), "{variant}");
     }
 }
@@ -142,7 +145,7 @@ fn morph_targets_apply_at_the_default_weights() {
 #[test]
 fn a_primitive_without_indices_reads_its_vertices_in_order() {
     let model = read("TriangleWithoutIndices", "glTF-Embedded");
-    assert_eq!(model.meshes[0].primitives[0].indices, [0, 1, 2]);
+    assert_eq!(*model.meshes[0].primitives[0].indices, [0, 1, 2]);
 }
 
 #[test]

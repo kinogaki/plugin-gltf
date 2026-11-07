@@ -3,9 +3,6 @@ use super::Value;
 use std::borrow::Cow;
 use std::fmt;
 
-/// Nesting deeper than this is refused rather than recursed into.
-const MAX_DEPTH: usize = 256;
-
 /// Why text isn't JSON, and the byte where reading stopped.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct JsonError {
@@ -19,12 +16,14 @@ impl fmt::Display for JsonError {
     }
 }
 
-/// Parses one JSON text (whitespace around it allowed).
-pub(crate) fn parse(text: &str) -> Result<Value<'_>, JsonError> {
+/// Parses one JSON text (whitespace around it allowed), refusing arrays
+/// and objects nested more than `most` deep rather than recursing into them.
+pub(crate) fn parse(text: &str, most: usize) -> Result<Value<'_>, JsonError> {
     let mut parser = Parser {
         text,
         at: 0,
         depth: 0,
+        most,
     };
     parser.space();
     let value = parser.value()?;
@@ -39,6 +38,7 @@ struct Parser<'a> {
     text: &'a str,
     at: usize,
     depth: usize,
+    most: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -98,7 +98,7 @@ impl<'a> Parser<'a> {
         &mut self,
         read: fn(&mut Self) -> Result<Value<'a>, JsonError>,
     ) -> Result<Value<'a>, JsonError> {
-        if self.depth == MAX_DEPTH {
+        if self.depth >= self.most {
             return Err(self.error("nested too deeply"));
         }
         self.depth += 1;

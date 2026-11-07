@@ -4,8 +4,10 @@
 //! mesh (`mesh`; a B-rep through the installed mesher), its instances (a
 //! child node an instance), its light or its camera (`scene`); the
 //! materials the polygons name are glTF PBR (`material`). A `.glb` holds
-//! its images, a `.gltf` names them beside it. What glTF can't hold is
-//! said.
+//! its images; a `.gltf` names them through `format::files::Beside`, a file
+//! on disk by its path relative to the `.gltf` and an embedded one written
+//! into `<stem>_textures/` beside it, so no file there is overwritten. What
+//! glTF can't hold is said.
 mod material;
 mod mesh;
 mod scene;
@@ -14,6 +16,7 @@ use crate::gltf::{self, Asset, Gltf};
 use crate::read::LINEAR_SRGB;
 use crate::space::Space;
 use crate::{TYPES, at_file};
+use kinogaki_studio_api::format::files::Beside;
 use kinogaki_studio_api::standard::{self, Materials};
 use kinogaki_studio_api::{
     DataTypeId, Diagnostic, Error, FileItem, FormatOptions, FormatWriter, Writing,
@@ -41,7 +44,11 @@ impl FormatWriter for Writer {
         let held = (items.iter())
             .filter_map(|i| i.data.as_ref())
             .find_map(|d| standard::materials().get(d));
+        let gltf_text = !path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("glb"));
         let mut out = Out {
+            beside: gltf_text.then(|| Beside::new(path)),
             model: Gltf {
                 asset: Asset {
                     generator: "Kinogaki Studio".to_owned(),
@@ -70,6 +77,10 @@ impl FormatWriter for Writer {
 /// A write as it goes: the model made so far and what made it.
 pub(crate) struct Out<'a> {
     model: Gltf,
+    /// Where a `.gltf`'s images go: a file on disk named by its path
+    /// relative to the `.gltf`, an embedded one written beside it, never
+    /// over another file; none for a GLB, which holds its images.
+    beside: Option<Beside>,
     writing: &'a Writing<'a>,
     space: Space,
     /// The materials item: what the polygons' keys name.

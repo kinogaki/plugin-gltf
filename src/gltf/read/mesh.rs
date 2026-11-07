@@ -1,10 +1,11 @@
 //! Meshes and their primitives: attributes decoded and checked, strips,
 //! fans and loops made lists, morph targets applied at the default weights.
 use super::fields::Obj;
-use super::{Reader, Result};
+use super::{Indices, Reader, Result};
 use crate::gltf::model::{Attribute, Kind, Mesh, Primitive, Topology};
+use std::collections::HashMap;
 
-impl Reader<'_, '_> {
+impl Reader<'_> {
     pub(super) fn mesh(&mut self, mesh: &Obj<'_, '_>, materials: usize) -> Result<Mesh> {
         let primitives = mesh.objects("primitives")?;
         if primitives.is_empty() {
@@ -35,12 +36,12 @@ impl Reader<'_, '_> {
             .object("attributes")?
             .ok_or_else(|| primitive.error("attributes", "missing"))?;
         let mut attributes = Vec::new();
-        for (name, _) in named.members() {
+        for (name, index) in named.indexed(self.accessors.len()) {
             // Skins are left out, and with them their joints and weights.
             if name.starts_with("JOINTS_") || name.starts_with("WEIGHTS_") {
                 continue;
             }
-            let index = named.required_index(name, self.accessors.len())?;
+            let index = index?;
             let kind = self.accessors[index].kind();
             if !fits(name, kind) {
                 return Err(named.error(name, format!("{name} can't be {}", kind.name())));
@@ -64,27 +65,35 @@ impl Reader<'_, '_> {
         if u32::try_from(count).is_err() {
             return Err(primitive.error("attributes", "more vertices than 32-bit indices reach"));
         }
-        let corners = match primitive.index("indices", self.accessors.len())? {
-            Some(index) => self.integers(index)?,
-            None => (0..count as u32).collect(),
+        let which = match primitive.index("indices", self.accessors.len())? {
+            Some(index) => Indices::Accessor(index),
+            None => Indices::Sequential(count),
         };
-        if let Some(past) = corners
-            .iter()
-            .copied()
-            .max()
-            .filter(|&max| max as usize >= count)
-        {
+        let (corners, max) = self.index_list(which)?;
+        if let Some(past) = max.filter(|&max| max as usize >= count) {
             return Err(
                 primitive.error("indices", format!("index {past} is past {count} vertices"))
             );
         }
         let mode = primitive.count("mode", 4)?;
-        let (topology, indices) =
-            lists(mode, corners).map_err(|message| primitive.error("mode", message))?;
-        for (target, deltas) in primitive.objects("targets")?.iter().enumerate() {
-            let weight = weights.get(target).copied().unwrap_or(0.0) as f32;
-            if weight != 0.0 {
-                self.morph(deltas, weight, &mut attributes)?;
+        let (topology, indices) = match lists(mode, &corners) {
+            Ok((topology, None)) => (topology, corners),
+            Ok((topology, Some(made))) => {
+                self.spend(made.len().checked_mul(4), &primitive.at)?;
+                (topology, made.into())
+            }
+            Err(message) => return Err(primitive.error("mode", message)),
+        };
+        let targets = primitive.objects("targets")?;
+        if !targets.is_empty() {
+            let by_name: HashMap<String, usize> = (attributes.iter().enumerate())
+                .map(|(at, a)| (a.name.clone(), at))
+                .collect();
+            for (target, deltas) in targets.iter().enumerate() {
+                let weight = weights.get(target).copied().unwrap_or(0.0) as f32;
+                if weight != 0.0 {
+                    self.morph(deltas, weight, &by_name, &mut attributes)?;
+                }
             }
         }
         Ok(Primitive {
@@ -100,19 +109,22 @@ impl Reader<'_, '_> {
         &mut self,
         target: &Obj<'_, '_>,
         weight: f32,
+        by_name: &HashMap<String, usize>,
         attributes: &mut [Attribute],
     ) -> Result<()> {
-        for (name, _) in target.members() {
-            let index = target.required_index(name, self.accessors.len())?;
-            let Some(attribute) = attributes.iter_mut().find(|a| a.name == name) else {
+        for (name, index) in target.indexed(self.accessors.len()) {
+            let index = index?;
+            let Some(&at) = by_name.get(name) else {
                 continue;
             };
+            let attribute = &mut attributes[at];
             let width = self.accessors[index].kind().width();
             if self.accessors[index].count() != attribute.count() || width > attribute.kind.width()
             {
                 return Err(target.error(name, format!("doesn't match the primitive's {name}")));
             }
             let deltas = self.unshared_floats(index)?;
+            self.spend(attribute.values.len().checked_mul(4), &target.at)?;
             let mut values = attribute.values.to_vec();
             for (vertex, delta) in values
                 .chunks_exact_mut(attribute.kind.width())
@@ -139,21 +151,24 @@ fn fits(name: &str, kind: Kind) -> bool {
     }
 }
 
-/// A primitive mode's corners as points, line pairs or triangle triples.
-/// Strips drop the degenerate triangles that join their runs.
-fn lists(mode: usize, v: Vec<u32>) -> std::result::Result<(Topology, Vec<u32>), String> {
+/// A primitive mode's corners as points, line pairs or triangle triples:
+/// the corners as they are (`None`), or the lists made of them. Strips
+/// drop the degenerate triangles that join their runs.
+type Lists = (Topology, Option<Vec<u32>>);
+
+fn lists(mode: usize, v: &[u32]) -> std::result::Result<Lists, String> {
     let n = v.len();
     Ok(match mode {
-        0 => (Topology::Points, v),
-        1 if n.is_multiple_of(2) => (Topology::Lines, v),
+        0 => (Topology::Points, None),
+        1 if n.is_multiple_of(2) => (Topology::Lines, None),
         2 | 3 => {
             let mut lines: Vec<u32> = v.windows(2).flatten().copied().collect();
             if mode == 2 && n > 2 {
                 lines.extend([v[n - 1], v[0]]);
             }
-            (Topology::Lines, lines)
+            (Topology::Lines, Some(lines))
         }
-        4 if n.is_multiple_of(3) => (Topology::Triangles, v),
+        4 if n.is_multiple_of(3) => (Topology::Triangles, None),
         5 => {
             let triangles = (0..n.saturating_sub(2))
                 .map(|i| {
@@ -164,13 +179,15 @@ fn lists(mode: usize, v: Vec<u32>) -> std::result::Result<(Topology, Vec<u32>), 
                     }
                 })
                 .filter(|[a, b, c]| a != b && b != c && c != a);
-            (Topology::Triangles, triangles.flatten().collect())
+            (Topology::Triangles, Some(triangles.flatten().collect()))
         }
         6 => (
             Topology::Triangles,
-            (1..n.saturating_sub(1))
-                .flat_map(|i| [v[i], v[i + 1], v[0]])
-                .collect(),
+            Some(
+                (1..n.saturating_sub(1))
+                    .flat_map(|i| [v[i], v[i + 1], v[0]])
+                    .collect(),
+            ),
         ),
         1 | 4 => return Err(format!("{n} corners don't make whole elements")),
         _ => return Err(format!("{mode} is no primitive mode")),
@@ -183,30 +200,36 @@ mod tests {
 
     #[test]
     fn strips_fans_and_loops_become_lists() {
-        let v = vec![0, 1, 2, 3, 4];
+        let v = [0, 1, 2, 3, 4];
+        let made = |mode, v: &[u32]| lists(mode, v).map(|(t, l)| (t, l.unwrap_or(v.to_vec())));
         assert_eq!(
-            lists(5, v.clone()).unwrap(),
+            made(5, &v).unwrap(),
             (Topology::Triangles, vec![0, 1, 2, 1, 3, 2, 2, 3, 4])
         );
         assert_eq!(
-            lists(6, v.clone()).unwrap(),
+            made(6, &v).unwrap(),
             (Topology::Triangles, vec![1, 2, 0, 2, 3, 0, 3, 4, 0])
         );
         assert_eq!(
-            lists(3, v.clone()).unwrap(),
+            made(3, &v).unwrap(),
             (Topology::Lines, vec![0, 1, 1, 2, 2, 3, 3, 4])
         );
         assert_eq!(
-            lists(2, v[..3].to_vec()).unwrap(),
+            made(2, &v[..3]).unwrap(),
             (Topology::Lines, vec![0, 1, 1, 2, 2, 0])
         );
         assert_eq!(
-            lists(5, vec![0, 1, 2, 2, 3, 3, 4, 5]).unwrap(),
+            made(5, &[0, 1, 2, 2, 3, 3, 4, 5]).unwrap(),
             (Topology::Triangles, vec![0, 1, 2, 3, 5, 4])
         );
-        assert!(lists(4, v.clone()).is_err());
-        assert!(lists(1, v.clone()).is_err());
-        assert!(lists(7, v).is_err());
-        assert_eq!(lists(5, vec![0, 1]).unwrap(), (Topology::Triangles, vec![]));
+        assert_eq!(
+            lists(4, &v[..3]).unwrap(),
+            (Topology::Triangles, None),
+            "as they are"
+        );
+        assert!(lists(4, &v).is_err());
+        assert!(lists(1, &v).is_err());
+        assert!(lists(7, &v).is_err());
+        assert_eq!(made(5, &[0, 1]).unwrap(), (Topology::Triangles, vec![]));
     }
 }

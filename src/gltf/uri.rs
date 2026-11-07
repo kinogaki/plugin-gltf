@@ -8,12 +8,15 @@ pub(crate) enum Uri<'a> {
     /// A base64 `data:` URI: its media type (empty when it gives none) and
     /// its base64 text.
     Data { mime: &'a str, base64: &'a str },
-    /// A relative reference, percent-decoded: a path relative to the file.
+    /// A path, percent-decoded: relative to the file, or absolute. Where it
+    /// may lead is the reader's to decide, on the decoded text.
     Path(String),
+    /// A URI of another scheme (`http:`, `file:`, a drive's `C:`).
+    Other,
 }
 
-/// Sorts `uri`; none for a URI of another scheme (`http:`, `file:`), an
-/// absolute path, a `data:` URI that isn't base64, or bad percent-escapes.
+/// Sorts `uri`; none for a `data:` URI that isn't base64, or bad
+/// percent-escapes.
 pub(crate) fn sort(uri: &str) -> Option<Uri<'_>> {
     if let Some(data) = uri.strip_prefix("data:") {
         let (header, base64) = data.split_once(',')?;
@@ -23,10 +26,10 @@ pub(crate) fn sort(uri: &str) -> Option<Uri<'_>> {
     let scheme = uri
         .find(':')
         .is_some_and(|colon| !uri[..colon].contains('/'));
-    if scheme || uri.starts_with('/') || uri.starts_with('\\') {
-        return None;
+    match scheme {
+        true => Some(Uri::Other),
+        false => percent_decoded(uri).map(Uri::Path),
     }
-    percent_decoded(uri).map(Uri::Path)
 }
 
 /// The bytes of a base64 `data:` URI's text.
@@ -166,15 +169,13 @@ mod tests {
             sort("dir/odd:name.png"),
             Some(Uri::Path("dir/odd:name.png".into()))
         );
-        for refused in [
-            "http://example.com/a.bin",
-            "file:///a.bin",
-            "/a.bin",
-            "C:\\a.bin",
-            "a%2",
-        ] {
-            assert_eq!(sort(refused), None, "{refused}");
+        for other in ["http://example.com/a.bin", "file:///a.bin", "C:\\a.bin"] {
+            assert_eq!(sort(other), Some(Uri::Other), "{other}");
         }
+        assert_eq!(sort("a%2"), None);
+        // Decoded before anything reads where it leads.
+        assert_eq!(sort("%2Fetc%2Fhosts"), Some(Uri::Path("/etc/hosts".into())));
+        assert_eq!(sort("/a.bin"), Some(Uri::Path("/a.bin".into())));
     }
 
     #[test]

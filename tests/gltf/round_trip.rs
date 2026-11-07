@@ -85,11 +85,19 @@ fn a_model_that_cant_be_written_is_refused_naming_where() {
         }
     };
     refused(
-        &|m| m.meshes[0].primitives[0].indices[0] = 99,
+        &|m| {
+            let mut indices = m.meshes[0].primitives[0].indices.to_vec();
+            indices[0] = 99;
+            m.meshes[0].primitives[0].indices = indices.into();
+        },
         "meshes[0].primitives[0]",
     );
     refused(
-        &|m| m.meshes[0].primitives[1].indices.push(0),
+        &|m| {
+            let mut indices = m.meshes[0].primitives[1].indices.to_vec();
+            indices.push(0);
+            m.meshes[0].primitives[1].indices = indices.into();
+        },
         "meshes[0].primitives[1]",
     );
     refused(
@@ -104,7 +112,7 @@ fn a_model_that_cant_be_written_is_refused_naming_where() {
     refused(
         &|m| {
             m.images[0].mime_type = None;
-            m.images[0].data = ImageData::Embedded(b"no signature".to_vec());
+            m.images[0].data = ImageData::Embedded(b"no signature"[..].into());
         },
         "images[0]",
     );
@@ -127,8 +135,10 @@ fn hand_run_write_the_model_setting_every_field_for_the_validator() {
     ];
     let mut model = everything();
     for image in &mut model.images {
-        (image.mime_type, image.data) =
-            (Some("image/png".into()), ImageData::Embedded(PNG.to_vec()));
+        (image.mime_type, image.data) = (
+            Some("image/png".into()),
+            ImageData::Embedded(PNG[..].into()),
+        );
     }
     model.textures[1].extension_source = None;
     model.textures[2] = Texture {
@@ -170,7 +180,7 @@ fn everything() -> Gltf {
     };
     let triangle = Primitive {
         topology: Topology::Triangles,
-        indices: vec![0, 1, 2],
+        indices: vec![0, 1, 2].into(),
         attributes: vec![
             position.clone(),
             attribute("NORMAL", Kind::Vec3, [0.0, 0.0, 1.0].repeat(3)),
@@ -185,13 +195,13 @@ fn everything() -> Gltf {
     };
     let lines = Primitive {
         topology: Topology::Lines,
-        indices: vec![0, 1, 1, 2],
+        indices: vec![0, 1, 1, 2].into(),
         attributes: vec![position.clone()],
         material: Some(1),
     };
     let points = Primitive {
         topology: Topology::Points,
-        indices: vec![2, 0],
+        indices: vec![2, 0].into(),
         attributes: vec![position],
         material: None,
     };
@@ -375,13 +385,17 @@ fn everything() -> Gltf {
             Sampler::default(),
         ],
         images: vec![
-            image("albedo", "image/png", ImageData::Embedded(png.clone())),
+            image(
+                "albedo",
+                "image/png",
+                ImageData::Embedded(png.as_slice().into()),
+            ),
             image(
                 "",
                 "image/jpeg",
                 ImageData::Path("textures/rough ness.jpg".into()),
             ),
-            image("compressed", "image/ktx2", ImageData::Embedded(ktx2)),
+            image("compressed", "image/ktx2", ImageData::Embedded(ktx2.into())),
         ],
         cameras: vec![
             Camera {

@@ -3,9 +3,9 @@
 use crate::common;
 
 use crate::common::{primitive, read_bytes, samples};
-use kinogaki_gltf::gltf::{self, GltfError, ReadOptions};
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use kinogaki_gltf::gltf::{self, GltfError};
+use kinogaki_studio_api::CancelToken;
+use kinogaki_studio_api::format::{ReadBudget, ReadLimits};
 
 /// The committed samples of at most `size` bytes, with no files beside.
 fn small_samples(size: u64) -> Vec<(String, Vec<u8>)> {
@@ -25,15 +25,11 @@ fn small_samples(size: u64) -> Vec<(String, Vec<u8>)> {
 
 /// Reads with a small budget, so mutated counts can't allocate much.
 fn read_bounded(bytes: &[u8]) -> Result<gltf::Gltf, GltfError> {
-    let options = ReadOptions {
-        max_decoded_bytes: 64 << 20,
-        ..ReadOptions::default()
-    };
-    gltf::read(
-        bytes,
-        &mut |_| Err(std::io::ErrorKind::NotFound.into()),
-        &options,
-    )
+    let budget = ReadBudget::new(ReadLimits {
+        total: 64 << 20,
+        ..ReadLimits::default()
+    });
+    gltf::read(bytes, &mut |_| Err("no files".into()), &budget)
 }
 
 #[test]
@@ -233,40 +229,23 @@ fn decoding_past_the_budget_is_refused_before_allocating() {
         )
     });
     assert!(matches!(huge, Err(GltfError::Limit(_))), "{huge:?}");
-    let options = ReadOptions {
-        max_decoded_bytes: 40,
-        ..ReadOptions::default()
-    };
+    let budget = ReadBudget::new(ReadLimits {
+        total: 40,
+        ..ReadLimits::default()
+    });
     let bytes = std::fs::read(common::sample("BoxTextured", "glTF-Binary")).unwrap();
-    let small = gltf::read(
-        &bytes,
-        &mut |_| Err(std::io::ErrorKind::NotFound.into()),
-        &options,
-    );
+    let small = gltf::read(&bytes, &mut |_| Err("no files".into()), &budget);
     assert!(matches!(small, Err(GltfError::Limit(_))));
 }
 
 #[test]
-fn a_raised_flag_cancels_a_read() {
+fn a_cancelled_budget_stops_a_read() {
     let bytes = std::fs::read(common::sample("BoxTextured", "glTF-Binary")).unwrap();
-    let flag = Arc::new(AtomicBool::new(true));
-    let options = ReadOptions {
-        cancel: Some(flag.clone()),
-        ..ReadOptions::default()
-    };
-    let read = gltf::read(
-        &bytes,
-        &mut |_| Err(std::io::ErrorKind::NotFound.into()),
-        &options,
-    );
+    let token = CancelToken::default();
+    let budget = ReadBudget::default().cancelled_by(token.clone());
+    let mut files = |_: &str| Err("no files".to_owned());
+    assert!(gltf::read(&bytes, &mut files, &budget).is_ok());
+    token.cancel();
+    let read = gltf::read(&bytes, &mut files, &budget);
     assert!(matches!(read, Err(GltfError::Cancelled)));
-    flag.store(false, std::sync::atomic::Ordering::Relaxed);
-    assert!(
-        gltf::read(
-            &bytes,
-            &mut |_| Err(std::io::ErrorKind::NotFound.into()),
-            &options
-        )
-        .is_ok()
-    );
 }
