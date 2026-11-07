@@ -117,7 +117,7 @@ pub(super) fn geometry(
     };
     if let Some(n) = &normals {
         let column = Attribute::tuples(n.clone(), Meaning::Normal)?;
-        attributes = attributes.with(Domain::Point, names::N, column)?;
+        attributes.set(Domain::Point, names::N, column)?;
     }
     let sets: BTreeSet<u32> = (prims.iter())
         .flat_map(|p| &p.attributes)
@@ -133,7 +133,7 @@ pub(super) fn geometry(
             |v| [v[0], 1.0 - v[1]],
         )?;
         let column = Attribute::tuples(uv, Meaning::TextureCoord)?;
-        attributes = attributes.with(Domain::Point, &uv_name(set), column)?;
+        attributes.set(Domain::Point, &uv_name(set), column)?;
     }
     if has("COLOR_0") {
         let rgba: Vec<[f32; 4]> = per_point(&prims, &named_in, "COLOR_0", [1.0; 4], budget, |v| {
@@ -142,7 +142,7 @@ pub(super) fn geometry(
         let mut rgb: Vec<[f64; 3]> = rgba.iter().map(|c| widen(&c[..3])).collect();
         colors.to_working(LINEAR_SRGB, &mut rgb)?;
         let cd: Vec<[f32; 3]> = rgb.iter().map(|c| c.map(|v| v as f32)).collect();
-        attributes = attributes.with(
+        attributes.set(
             Domain::Point,
             names::CD,
             Attribute::tuples(cd, Meaning::Color)?,
@@ -152,7 +152,7 @@ pub(super) fn geometry(
             .any(|a| a.kind == gltf::Kind::Vec4);
         if alpha {
             let a: Vec<f32> = rgba.iter().map(|c| c[3]).collect();
-            attributes = attributes.with(
+            attributes.set(
                 Domain::Point,
                 names::ALPHA,
                 Attribute::tuples(a, Meaning::None)?,
@@ -211,11 +211,10 @@ pub(super) fn geometry(
         }
         let ty = AttributeType::new(Storage::F32, width as u8, Meaning::None);
         let column = Attribute::new(ty, Values::F32(Column::new(values)))?;
-        attributes = attributes.with(Domain::Point, name, column)?;
+        attributes.set(Domain::Point, name, column)?;
     }
     if prims.iter().any(|p| p.material.is_some()) {
-        attributes =
-            attributes.with(Domain::Primitive, names::MATERIAL, table.materials(&prims)?)?;
+        attributes.set(Domain::Primitive, names::MATERIAL, table.materials(&prims)?)?;
     }
     let primitives = Primitives::new(
         points,
@@ -227,7 +226,7 @@ pub(super) fn geometry(
     if normals.is_none() {
         // glTF shades a mesh without normals flat: every edge sharp.
         let edges = Elements::all(primitives.edge_count());
-        attributes = attributes.with_group(Domain::Edge, names::SHARP, edges)?;
+        attributes.set_group(Domain::Edge, names::SHARP, edges)?;
     }
     Ok(Some(Geometry::new(
         Column::new(positions),
