@@ -12,7 +12,7 @@
 //! `yfov` on a 24 mm high film back, `xmag` and `ymag` as the view's size.
 use crate::gltf::{self, Gltf, LightKind, Projection};
 use crate::space::{self, Placed};
-use kinogaki_render_api::standard::{Light, Shape};
+use kinogaki_render_api::standard::{Light, LightShape};
 use kinogaki_render_api::{Camera, Projection as Lens};
 use kinogaki_studio_api::color::{ColorService, LIN_REC709};
 use kinogaki_studio_api::format::Conversion;
