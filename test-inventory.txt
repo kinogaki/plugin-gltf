@@ -55,6 +55,7 @@ kinogaki-gltf/gltf test samples::morph_targets_apply_at_the_default_weights
 kinogaki-gltf/gltf test samples::samplers_keep_their_filters_and_wraps
 kinogaki-gltf/gltf test samples::strips_fans_and_loops_read_as_lists
 kinogaki-gltf/gltf test samples::texture_transforms_fold_into_their_references
+kinogaki-gltf/gltf test up_axis::a_z_up_projects_faces_write_and_read_back_turned_not_mirrored
 kinogaki-gltf/lib test gltf::base64::tests::bytes_outside_the_alphabet_and_impossible_lengths_are_refused
 kinogaki-gltf/lib test gltf::base64::tests::every_length_reads_back_with_or_without_padding
 kinogaki-gltf/lib test gltf::glb::tests::a_container_splits_into_what_was_joined

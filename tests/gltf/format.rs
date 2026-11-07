@@ -21,7 +21,7 @@ use std::path::Path;
 /// A project whose working space is glTF's own, linear Rec.709: colors
 /// arrive and leave as the file holds them.
 #[derive(Debug)]
-struct Rec709;
+pub(crate) struct Rec709;
 
 impl kinogaki_studio_api::color::ColorService for Rec709 {
     fn working(&self) -> &str {
@@ -41,7 +41,7 @@ impl kinogaki_studio_api::color::ColorService for Rec709 {
 }
 
 /// The file at `path` imported in a project of `units`.
-fn imported(path: &Path, units: Units) -> Imported {
+pub(crate) fn imported(path: &Path, units: Units) -> Imported {
     let reading = Reading::new(Purpose::Objects, units, &Rec709);
     (Format.read(&Input::file(path), &Format.options(), &reading))
         .unwrap_or_else(|e| panic!("{}: {e}", path.display()))
