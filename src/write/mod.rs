@@ -19,7 +19,7 @@ use crate::{TYPES, at_file};
 use kinogaki_studio_api::color::{LIN_REC709, settled};
 use kinogaki_studio_api::format::Conversion;
 use kinogaki_studio_api::format::files::Beside;
-use kinogaki_studio_api::standard::{self, Materials};
+use kinogaki_studio_api::standard::{self, ImportedMaterial};
 use kinogaki_studio_api::{
     DataTypeId, Diagnostic, Error, FileItem, FormatOptions, FormatWriter, Writing,
 };
@@ -43,9 +43,10 @@ impl FormatWriter for Writer {
         _: &FormatOptions,
     ) -> Result<Vec<Diagnostic>, Error> {
         writing.check()?;
-        let held = (items.iter())
-            .filter_map(|i| i.data.as_ref())
-            .find_map(|d| standard::materials().get(d));
+        let held: Vec<&ImportedMaterial> = (items.iter())
+            .filter_map(|i| standard::materials().get(i.data.as_ref()?))
+            .flat_map(|m| &m.materials)
+            .collect();
         let gltf_text = !path
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("glb"));
@@ -64,9 +65,8 @@ impl FormatWriter for Writer {
             looks: material::Looks::default(),
             warnings: Vec::new(),
         };
-        // Every material the item holds, in its order: Export hands the
-        // ones the items name.
-        for m in held.map_or(&[][..], |h| &h.materials) {
+        // Every material of every library, in their order: unused ones too.
+        for m in out.held.clone() {
             out.material(&m.key)?;
         }
         scene::nodes(items, &mut out)?;
@@ -86,8 +86,8 @@ pub(crate) struct Out<'a> {
     writing: &'a Writing<'a>,
     /// The project's space into glTF's, the read's inverse.
     to_file: Conversion,
-    /// The materials item: what the polygons' keys name.
-    held: Option<&'a Materials>,
+    /// Every library's materials: what the polygons' keys name.
+    held: Vec<&'a ImportedMaterial>,
     looks: material::Looks,
     warnings: Vec<Diagnostic>,
 }

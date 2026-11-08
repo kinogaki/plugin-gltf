@@ -51,14 +51,12 @@ const GLTF_TEXTURES: [&str; 12] = [
 
 impl Out<'_> {
     /// The glTF material the polygons' key `key` names, made once; none for a
-    /// key naming no material of the materials item.
+    /// key naming no material of the libraries.
     pub(super) fn material(&mut self, key: &str) -> Result<Option<usize>, Error> {
         if let Some(&made) = self.looks.made.get(key) {
             return Ok(made);
         }
-        let imported = self
-            .held
-            .and_then(|h| h.materials.iter().find(|m| m.key == key));
+        let imported = self.held.iter().copied().find(|m| m.key == key);
         let made = match imported {
             Some(m) => Some(self.write_material(m)?),
             None => {
