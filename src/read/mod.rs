@@ -66,10 +66,7 @@ pub(crate) fn read(
         .collect::<Result<Vec<_>, Error>>()?;
     let materials = FileItem::top(
         "Materials",
-        standard::materials().wrap(Materials {
-            materials,
-            images: Vec::new(),
-        }),
+        standard::materials().wrap(Materials { materials }),
     );
     if reading.purpose == Purpose::Value && reading.wants == Some(standard::materials().id()) {
         return Ok(Imported {

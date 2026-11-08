@@ -7,6 +7,7 @@ kinogaki-gltf/gltf hand round_trip::hand_run_the_model_setting_every_field_passe
 kinogaki-gltf/gltf test accessors::a_sparse_accessor_without_a_view_replaces_zeros
 kinogaki-gltf/gltf test accessors::components_normalize_as_gltf_defines
 kinogaki-gltf/gltf test accessors::strided_views_and_padded_matrix_columns_read_element_by_element
+kinogaki-gltf/gltf test format::a_dome_of_each_image_is_left_out_said
 kinogaki-gltf/gltf test format::a_file_node_reads_the_file_as_one_value
 kinogaki-gltf/gltf test format::a_file_without_materials_brings_no_materials_item
 kinogaki-gltf/gltf test format::a_mesh_of_primitives_with_and_without_a_material_reads

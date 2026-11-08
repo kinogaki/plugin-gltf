@@ -170,6 +170,55 @@ fn written(read: &Imported, units: Units, name: &str) -> (gltf::Gltf, Vec<String
     (model, said.into_iter().map(|d| d.message).collect())
 }
 
+/// glTF has no dome: a dome holding each kind of image (a file, a held
+/// file, an Image node) is left out, said, and the lights beside it are
+/// written.
+#[test]
+fn a_dome_of_each_image_is_left_out_said() {
+    use kinogaki_render_api::standard::{Light, LightShape};
+    use kinogaki_studio_api::FileItem;
+    use kinogaki_studio_api::geometry::EmbeddedFile;
+    use kinogaki_studio_api::geometry::image::ImageSource;
+    use kinogaki_studio_api::value::ImageRef;
+    let held = ImageFile::Embedded(EmbeddedFile::new("noon.exr", vec![1, 2, 3]));
+    let images = [
+        ImageRef::File(ImageSource::path("/sky/noon.exr")),
+        ImageRef::File(ImageSource::new(held, ImageColor::Data)),
+        ImageRef::Node("/Library/Sky".into()),
+    ];
+    let light = |shape| {
+        standard::light()
+            .wrap(Light {
+                shape,
+                ..Light::default()
+            })
+            .unwrap()
+    };
+    let mut items: Vec<FileItem> = (images.into_iter().enumerate())
+        .map(|(k, image)| {
+            let dome = LightShape::Dome {
+                image: Some(image),
+                ground: None,
+            };
+            FileItem::top(format!("Dome {k}"), light(dome))
+        })
+        .collect();
+    items.push(FileItem::top(
+        "Sun",
+        light(LightShape::Distant { angle: 0.0 }),
+    ));
+    let read = kinogaki_studio_api::Imported {
+        items,
+        warnings: Vec::new(),
+    };
+    let (model, said) = written(&read, Units::default(), "Domes.gltf");
+    assert_eq!(model.lights.len(), 1, "the sun alone");
+    for k in 0..3 {
+        let line = format!("Dome {k}: glTF has no dome light; left out");
+        assert!(said.contains(&line), "{line} in {said:?}");
+    }
+}
+
 #[test]
 fn every_sample_writes_back_with_the_same_materials() {
     for path in samples() {
