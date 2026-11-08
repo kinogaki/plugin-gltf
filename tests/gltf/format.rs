@@ -175,7 +175,7 @@ fn written(read: &Imported, units: Units, name: &str) -> (gltf::Gltf, Vec<String
 /// written.
 #[test]
 fn a_dome_of_each_image_is_left_out_said() {
-    use kinogaki_render_api::standard::{Light, LightShape};
+    use kinogaki_render_api::standard::{DomeFormat, Light, LightShape, Pole};
     use kinogaki_studio_api::FileItem;
     use kinogaki_studio_api::geometry::EmbeddedFile;
     use kinogaki_studio_api::geometry::image::ImageSource;
@@ -198,6 +198,8 @@ fn a_dome_of_each_image_is_left_out_said() {
         .map(|(k, image)| {
             let dome = LightShape::Dome {
                 image: Some(image),
+                format: DomeFormat::Automatic,
+                pole: Pole::Scene,
                 ground: None,
             };
             FileItem::top(format!("Dome {k}"), light(dome))

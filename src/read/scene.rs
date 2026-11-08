@@ -4,15 +4,16 @@
 //! instances of it, one placement where the node is: one value their items
 //! share, the mesh held once (and written once).
 //!
-//! Lights (`KHR_lights_punctual`): a point light is a spot of
-//! 180° and 1 mm radius, a spot light a spot of its outer cone softened
-//! over the share of it outside the inner one, a directional light a
-//! distant one; candela and lux are the intensity's illuminance at a metre,
-//! so a sphere's radiance is its candela over its projected area. Cameras:
+//! Lights (`KHR_lights_punctual`): a point light is a sphere light of 1 mm
+//! treated as a point, a spot light the same shaped by its outer cone
+//! softened over the share of it outside the inner one, a directional
+//! light a distant one; candela and lux are the intensity's illuminance at
+//! a metre, so a normalized sphere's radiance is four times its candela
+//! (its power over 4π sr, whatever its size). Cameras:
 //! `yfov` on a 24 mm high film back, `xmag` and `ymag` as the view's size.
 use crate::gltf::{self, Gltf, LightKind, Projection};
 use crate::space::{self, Placed};
-use kinogaki_render_api::standard::{Light, LightShape};
+use kinogaki_render_api::standard::{Light, LightShape, Shaping};
 use kinogaki_render_api::{Camera, Projection as Lens};
 use kinogaki_studio_api::color::{ColorService, LIN_REC709};
 use kinogaki_studio_api::format::Conversion;
@@ -155,38 +156,35 @@ fn light_of(
 ) -> Result<Light, Error> {
     let mut color = [light.color];
     colors.to_working(LIN_REC709, &mut color)?;
-    let radius = space.length(RADIUS) as f32;
-    let sphere = std::f64::consts::PI * RADIUS * RADIUS;
-    let (shape, intensity) = match light.kind {
-        LightKind::Directional => (LightShape::Distant { angle: 0.0 }, light.intensity),
-        LightKind::Point => (
-            LightShape::Spot {
-                radius,
-                cone_angle: 180.0,
-                cone_softness: 0.0,
-            },
-            light.intensity / sphere,
-        ),
+    let point = LightShape::Sphere {
+        radius: space.length(RADIUS) as f32,
+        point: true,
+    };
+    let (shape, intensity, shaping) = match light.kind {
+        LightKind::Directional => (LightShape::Distant { angle: 0.0 }, light.intensity, None),
+        LightKind::Point => (point, 4.0 * light.intensity, None),
         LightKind::Spot {
             inner_cone_angle,
             outer_cone_angle,
-        } => (
-            LightShape::Spot {
-                radius,
+        } => {
+            let shaping = Shaping {
                 cone_angle: outer_cone_angle.to_degrees() as f32,
                 cone_softness: match outer_cone_angle > 0.0 {
                     true => ((outer_cone_angle - inner_cone_angle) / outer_cone_angle) as f32,
                     false => 0.0,
                 },
-            },
-            light.intensity / sphere,
-        ),
+                ..Shaping::default()
+            };
+            (point, 4.0 * light.intensity, Some(shaping))
+        }
     };
+    let normalize = shaping.is_some() || matches!(light.kind, LightKind::Point);
     Ok(Light {
         shape,
         color: color[0].map(|c| c as f32),
         intensity: intensity as f32,
-        normalize: false,
+        normalize,
+        shaping,
         ..Light::default()
     })
 }

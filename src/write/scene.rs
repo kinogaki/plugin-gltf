@@ -4,8 +4,10 @@
 //! mesh written once (once more for an instance whose `material` stands in
 //! for its prototype's own), but one placement where the node is of a mesh
 //! in its own material (a mesh several nodes show) the node's mesh. Lights
-//! and cameras are the read's inverse; an area light is written as a spot
-//! light of its intensity facing down its axis, a dome is left out, said.
+//! and cameras are the read's inverse (a sphere light a point light, a
+//! shaped one a spot light); a rect or disk light is written as a spot light
+//! of its intensity facing down its axis, a cylinder as a point light of its
+//! intensity across its side, a dome is left out, said.
 use super::Out;
 use crate::gltf::{self, Camera, LightKind, Node, Projection, Scene};
 use crate::read::scene::FAR;
@@ -205,27 +207,35 @@ fn light_of(light: &Light, name: &str, out: &mut Out<'_>) -> Result<Option<usize
             };
             (LightKind::Directional, gain * disk)
         }
-        LightShape::Spot {
-            radius,
-            cone_angle,
-            cone_softness,
-        } => {
-            let r = metres(radius);
+        LightShape::Sphere { radius, .. } => {
+            // Its radiant intensity: radiance × πr², normalized radiance / 4.
+            let intensity = match light.normalize {
+                true => gain / 4.0,
+                false => gain * PI * metres(radius).powi(2),
+            };
+            let kind = match &light.shaping {
+                Some(s) if s.cone_angle < 180.0 => {
+                    let outer = f64::from(s.cone_angle).to_radians();
+                    LightKind::Spot {
+                        inner_cone_angle: outer * (1.0 - f64::from(s.cone_softness)),
+                        outer_cone_angle: outer.min(PI / 2.0),
+                    }
+                }
+                _ => LightKind::Point,
+            };
+            (kind, intensity)
+        }
+        LightShape::Cylinder { length, radius, .. } => {
+            out.warn(format!("{name}: a cylinder light written as a point light"));
+            let area = 2.0 * PI * f64::from(radius) * f64::from(length);
+            let across = metres(length) * 2.0 * metres(radius);
             let radiance = match light.normalize {
-                true => gain / (4.0 * PI * f64::from(radius).powi(2)),
+                true => gain / area,
                 false => gain,
             };
-            let outer = f64::from(cone_angle).to_radians();
-            let kind = match cone_angle >= 180.0 {
-                true => LightKind::Point,
-                false => LightKind::Spot {
-                    inner_cone_angle: outer * (1.0 - f64::from(cone_softness)),
-                    outer_cone_angle: outer.min(PI / 2.0),
-                },
-            };
-            (kind, radiance * PI * r * r)
+            (LightKind::Point, radiance * across)
         }
-        LightShape::Rect { width, height } => {
+        LightShape::Rect { width, height, .. } => {
             out.warn(format!("{name}: an area light written as a spot light"));
             let area = f64::from(width) * f64::from(height);
             area_light(light, gain, area, metres(width) * metres(height))
