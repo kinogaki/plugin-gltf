@@ -144,9 +144,8 @@ pub(super) fn geometry(
         let rgba: Vec<[f32; 4]> = per_point(&prims, &named_in, "COLOR_0", [1.0; 4], budget, |v| {
             [v[0], v[1], v[2], v.get(3).copied().unwrap_or(1.0)]
         })?;
-        let mut rgb: Vec<[f64; 3]> = rgba.iter().map(|c| widen(&c[..3])).collect();
-        colors.to_working(LIN_REC709, &mut rgb)?;
-        let cd: Vec<[f32; 3]> = rgb.iter().map(|c| c.map(|v| v as f32)).collect();
+        let mut cd: Vec<[f32; 3]> = rgba.iter().map(|c| [c[0], c[1], c[2]]).collect();
+        colors.convert_f32(LIN_REC709, colors.working(), &mut cd)?;
         attributes.set(
             Domain::Point,
             names::CD,

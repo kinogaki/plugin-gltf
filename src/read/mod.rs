@@ -16,7 +16,8 @@ use crate::gltf::{self, ImageData};
 use crate::space;
 use kinogaki_studio_api::edit::editor::{Placed, gather};
 use kinogaki_studio_api::format::files::Named;
-use kinogaki_studio_api::geometry::image::{EmbeddedFile, ImageFile};
+use kinogaki_studio_api::geometry::EmbeddedFile;
+use kinogaki_studio_api::geometry::image::ImageFile;
 use kinogaki_studio_api::standard::{self, Materials};
 use kinogaki_studio_api::{
     Diagnostic, Error, FileItem, FormatOptions, Imported, Input, Purpose, Reading,

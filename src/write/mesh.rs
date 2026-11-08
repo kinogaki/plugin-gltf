@@ -314,11 +314,9 @@ fn primitive(
         );
     }
     if let Some(c) = &columns.color {
-        let mut rgb: Vec<[f64; 3]> = (firsts.iter())
-            .map(|&[p, v, f]| c.get(p, v, f).map(f64::from))
-            .collect();
-        out.writing.colors.working_to(LIN_REC709, &mut rgb)?;
-        let rgb: Vec<[f32; 3]> = rgb.iter().map(|c| c.map(|v| v as f32)).collect();
+        let mut rgb: Vec<[f32; 3]> = firsts.iter().map(|&[p, v, f]| c.get(p, v, f)).collect();
+        let colors = out.writing.colors;
+        colors.convert_f32(colors.working(), LIN_REC709, &mut rgb)?;
         match &columns.alpha {
             Some(a) => {
                 let rgba = (rgb.iter().zip(&firsts))
