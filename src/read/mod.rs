@@ -16,8 +16,8 @@ use crate::gltf::{self, ImageData};
 use crate::space;
 use kinogaki_studio_api::edit::editor::{Placed, gather};
 use kinogaki_studio_api::format::files::Named;
-use kinogaki_studio_api::geometry::EmbeddedFile;
 use kinogaki_studio_api::geometry::image::ImageFile;
+use kinogaki_studio_api::geometry::{EmbeddedFile, Units};
 use kinogaki_studio_api::standard::{self, Materials};
 use kinogaki_studio_api::{
     Diagnostic, Error, FileItem, FormatOptions, Imported, Input, Purpose, Reading,
@@ -52,7 +52,9 @@ pub(crate) fn read(
     let mut warnings: Vec<Diagnostic> = (model.left_out.iter())
         .map(|left| Diagnostic::warning(left.to_string()))
         .collect();
-    let space = space::into_project(reading.units);
+    // glTF is in metres, Y up.
+    let kept = reading.document_units(Units::METERS);
+    let space = space::into_project(kept.unwrap_or(reading.units));
     let files = image_files(std::mem::take(&mut model.images), &named, &mut warnings);
     warnings.extend(named.warnings());
     let colored = mesh::colored_materials(&model);
@@ -72,6 +74,7 @@ pub(crate) fn read(
         return Ok(Imported {
             items: vec![materials],
             warnings,
+            ..Imported::default()
         });
     }
     // The materials item first, when the file has any.
@@ -83,10 +86,14 @@ pub(crate) fn read(
     let meshes = scene::shared(&model, meshes)?;
     scene::items(&model, &meshes, &space, colors, &mut items, &mut warnings)?;
     let items = match reading.purpose {
-        Purpose::Objects => items,
+        Purpose::Objects | Purpose::Document => items,
         Purpose::Value => vec![gathered(&items, input)?],
     };
-    Ok(Imported { items, warnings })
+    Ok(Imported {
+        items,
+        warnings,
+        units: kept,
+    })
 }
 
 /// Every mesh of `items` where it is placed (instances realized), as one

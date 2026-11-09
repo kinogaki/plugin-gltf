@@ -211,7 +211,7 @@ fn a_dome_of_each_image_is_left_out_said() {
     ));
     let read = kinogaki_studio_api::Imported {
         items,
-        warnings: Vec::new(),
+        ..Default::default()
     };
     let (model, said) = written(&read, Units::default(), "Domes.gltf");
     assert_eq!(model.lights.len(), 1, "the sun alone");
