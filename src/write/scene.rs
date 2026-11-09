@@ -189,7 +189,7 @@ fn instances(
 }
 
 /// `light` as a `KHR_lights_punctual` light (its index), the read's
-/// inverse; none for a dome, said.
+/// inverse; none for a dome, a portal or a geometry light, said.
 fn light_of(light: &Light, name: &str, out: &mut Out<'_>) -> Result<Option<usize>, Error> {
     let gain = f64::from(light.intensity) * 2f64.powf(f64::from(light.exposure));
     let to_file = out.to_file;
@@ -197,6 +197,14 @@ fn light_of(light: &Light, name: &str, out: &mut Out<'_>) -> Result<Option<usize
     let (kind, intensity) = match light.shape {
         LightShape::Dome { .. } => {
             out.warn(format!("{name}: glTF has no dome light; left out"));
+            return Ok(None);
+        }
+        LightShape::Portal { .. } => {
+            out.warn(format!("{name}: glTF has no portal light; left out"));
+            return Ok(None);
+        }
+        LightShape::Geometry { .. } => {
+            out.warn(format!("{name}: glTF has no mesh light; left out"));
             return Ok(None);
         }
         LightShape::Distant { angle } => {
